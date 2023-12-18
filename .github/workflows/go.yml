@@ -1,0 +1,34 @@
+# This workflow will build a golang project
+# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-go
+
+name: Go
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Get current date
+      id: date
+      run: |
+        echo "DATE=$(date +'%y%m')" >> $GITHUB_ENV
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+    - name: Build knotidx
+      run: go build -v ./cmd/knotidx
+    - name: Archive production artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: knotidx-release-${{ env.DATE }}-${{ github.ref_name }}-${{ github.sha }}
+        path: |
+          knotidx
