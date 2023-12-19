@@ -9,7 +9,7 @@ import (
 
 type BadgerStore struct {
 	storePath string
-	storeDb   *badger.DB
+	db        *badger.DB
 	inMemory  bool
 }
 
@@ -24,35 +24,35 @@ func NewInMemoryBadgerStore() *BadgerStore {
 	return NewBadgerStore("", true)
 }
 
-func (store *BadgerStore) Open() (err error) {
-	if store.storeDb != nil {
+func (s *BadgerStore) Open() (err error) {
+	if s.db != nil {
 		return
 	}
-	store.storeDb, err = badger.Open(badger.DefaultOptions(store.storePath).WithInMemory(true))
+	s.db, err = badger.Open(badger.DefaultOptions(s.storePath).WithInMemory(s.inMemory))
 	if err != nil {
 		log.Println(err)
 	}
 	return
 }
 
-func (store *BadgerStore) Close() (err error) {
-	if store.storeDb == nil {
+func (s *BadgerStore) Close() (err error) {
+	if s.db == nil {
 		return
 	}
-	err = store.storeDb.Close()
+	err = s.db.Close()
 	if err != nil {
 		log.Println(err)
 	}
 	return
 }
 
-func (store *BadgerStore) Add(updates map[string]ItemInfo) {
-	store.Open()
-	txn := store.storeDb.NewTransaction(true)
+func (s *BadgerStore) Add(updates map[string]ItemInfo) {
+	s.Open()
+	txn := s.db.NewTransaction(true)
 	for k, v := range updates {
 		if err := txn.Set([]byte(k), v.Encode()); errors.Is(err, badger.ErrTxnTooBig) {
 			_ = txn.Commit()
-			txn = store.storeDb.NewTransaction(true)
+			txn = s.db.NewTransaction(true)
 			_ = txn.Set([]byte(k), v.Encode())
 		}
 	}
@@ -60,9 +60,9 @@ func (store *BadgerStore) Add(updates map[string]ItemInfo) {
 	return
 }
 
-func (store *BadgerStore) GetAll() (items []*ItemInfo, err error) {
-	store.Open()
-	err = store.storeDb.View(func(txn *badger.Txn) error {
+func (s *BadgerStore) GetAll() (items []*ItemInfo, err error) {
+	s.Open()
+	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchSize = 10
 		it := txn.NewIterator(opts)
