@@ -2,12 +2,9 @@ package store
 
 import (
 	"errors"
-	"fmt"
 	"log"
 
 	"github.com/dgraph-io/badger/v4"
-
-	"knot/internal/item"
 )
 
 var GlobalStore = &Store{
@@ -16,7 +13,11 @@ var GlobalStore = &Store{
 }
 
 func init() {
-	GlobalStore.Open()
+	err := GlobalStore.Open()
+	if err != nil {
+		log.Fatal(err)
+		return
+	}
 }
 
 type Store struct {
@@ -24,15 +25,23 @@ type Store struct {
 	storeDb   *badger.DB
 }
 
-func (store *Store) Open() {
-	var err error
+func (store *Store) Open() (err error) {
 	store.storeDb, err = badger.Open(badger.DefaultOptions(store.storePath).WithInMemory(true))
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
+	return
 }
 
-func (store *Store) Add(updates map[string]item.ItemInfo) {
+func (store *Store) Close() (err error) {
+	err = store.storeDb.Close()
+	if err != nil {
+		log.Println(err)
+	}
+	return
+}
+
+func (store *Store) Add(updates map[string]ItemInfo) {
 	txn := store.storeDb.NewTransaction(true)
 	for k, v := range updates {
 		if err := txn.Set([]byte(k), v.Encode()); errors.Is(err, badger.ErrTxnTooBig) {
@@ -44,20 +53,21 @@ func (store *Store) Add(updates map[string]item.ItemInfo) {
 	_ = txn.Commit()
 }
 
-func (store *Store) List() {
-	err := store.storeDb.View(func(txn *badger.Txn) error {
+func (store *Store) GetAll() (items []*ItemInfo, err error) {
+	err = store.storeDb.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchSize = 10
 		it := txn.NewIterator(opts)
 		defer it.Close()
 		for it.Rewind(); it.Valid(); it.Next() {
 			i := it.Item()
-			storeItem := item.Item(i)
-			fmt.Println(*storeItem)
+			storeItem := Item(i)
+			items = append(items, storeItem)
 		}
 		return nil
 	})
 	if err != nil {
-		log.Fatal(err)
+		log.Println(err)
 	}
+	return
 }

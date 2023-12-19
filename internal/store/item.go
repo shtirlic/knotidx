@@ -1,27 +1,34 @@
-package item
+package store
 
 import (
 	"bytes"
 	"encoding/gob"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dgraph-io/badger/v4"
 )
 
-type Type string
+type ItemType string
 
 const (
-	DIR  Type = "dir"
-	FILE Type = "file"
+	DIR  ItemType = "dir"
+	FILE ItemType = "file"
 )
 
 type ItemInfo struct {
-	Hash    string
 	Name    string
 	Path    string
+	Type    ItemType
 	ModTime time.Time
 	Size    int64
-	Type    Type
+	Hash    string
+}
+
+func (o *ItemInfo) String() string {
+
+	return strings.Join([]string{o.Path, string(o.Type), o.ModTime.String(), strconv.FormatInt(o.Size, 10)}, "")
 }
 
 func (o *ItemInfo) Encode() []byte {

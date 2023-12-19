@@ -3,12 +3,12 @@ package indexer
 import (
 	"fmt"
 	"hash/fnv"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 
-	"knot/internal/item"
 	"knot/internal/store"
 )
 
@@ -91,29 +91,29 @@ func (indexer *Indexer) Run() {
 	idxSize := 0
 	idxDirSize := 0
 	idxFileSize := 0
-	fileList := make(map[string]item.ItemInfo)
-	dirList := make(map[string]item.ItemInfo)
+	itemList := make(map[string]store.ItemInfo)
 	err := filepath.Walk(indexer.RootPath, func(path string, info os.FileInfo, err error) error {
 		if slices.Contains(indexer.ExcludeFilters, info.Name()) {
 			return filepath.SkipDir
 		}
-		objInfo := item.ItemInfo{
+		objInfo := store.ItemInfo{
 			Hash:    "",
 			Name:    info.Name(),
 			Path:    path,
 			ModTime: info.ModTime(),
 			Size:    info.Size(),
 		}
-		// fmt.Println(path)
 		if info.IsDir() {
-			objInfo.Type = item.DIR
+			objInfo.Type = store.DIR
 			idxDirSize++
-			dirList[fmt.Sprintf("dir_%s", path)] = objInfo
 		} else {
-			objInfo.Type = item.FILE
+			objInfo.Type = store.FILE
 			idxFileSize++
-			fileList[fmt.Sprintf("file_%s", path)] = objInfo
 		}
+
+		objInfo.Hash = hash(objInfo.String())
+		keyName := fmt.Sprintf("%s_%s", objInfo.Type, path)
+		itemList[keyName] = objInfo
 
 		idxSize++
 		return err
@@ -122,16 +122,15 @@ func (indexer *Indexer) Run() {
 		fmt.Println(err)
 	}
 
-	store.GlobalStore.Add(dirList)
-	store.GlobalStore.Add(fileList)
+	store.GlobalStore.Add(itemList)
 
-	_, err = fmt.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
+	log.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
 
-	store.GlobalStore.List()
-
+	all, err := store.GlobalStore.GetAll()
 	if err != nil {
-		fmt.Println(err)
+		log.Println(err)
 	}
+	log.Println(all)
 }
 
 func hash(s string) string {
