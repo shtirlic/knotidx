@@ -28,7 +28,12 @@ type ItemInfo struct {
 
 func (o *ItemInfo) String() string {
 
-	return strings.Join([]string{o.Path, string(o.Type), o.ModTime.String(), strconv.FormatInt(o.Size, 10)}, "")
+	return strings.Join([]string{
+		o.Path,
+		string(o.Type),
+		o.ModTime.String(),
+		strconv.FormatInt(o.Size, 10),
+	}, "")
 }
 
 func (o *ItemInfo) Encode() []byte {
@@ -38,21 +43,17 @@ func (o *ItemInfo) Encode() []byte {
 	if err != nil {
 		return nil
 	}
-	// fmt.Println(buff.Len())
 	return buff.Bytes()
 }
 
 func (o *ItemInfo) Decode(data []byte) {
-	// fmt.Println(len(data))
 	var buff bytes.Buffer
 	enc := gob.NewDecoder(&buff)
 	buff.Write(data)
-	// fmt.Println(buff.Len())
 	err := enc.Decode(o)
 	if err != nil {
 		return
 	}
-	// fmt.Println(buff.Len())
 
 }
 

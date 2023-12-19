@@ -88,7 +88,6 @@ func NewIndexer(rootPath string, excludeFilter []string) *Indexer {
 }
 
 func (indexer *Indexer) Run() {
-
 	idxSize := 0
 	idxDirSize := 0
 	idxFileSize := 0
@@ -111,7 +110,6 @@ func (indexer *Indexer) Run() {
 			objInfo.Type = store.FILE
 			idxFileSize++
 		}
-
 		objInfo.Hash = strconv.FormatUint(xxhash.Sum64String(objInfo.String()), 10)
 		keyName := fmt.Sprintf("%s_%s", objInfo.Type, path)
 		itemList[keyName] = objInfo
@@ -123,11 +121,12 @@ func (indexer *Indexer) Run() {
 		fmt.Println(err)
 	}
 
-	store.GlobalStore.Add(itemList)
+	var s store.Store = store.NewInMemoryBadgerStore()
+	s.Add(itemList)
 
 	log.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
 
-	all, err := store.GlobalStore.GetAll()
+	all, err := s.GetAll()
 	if err != nil {
 		log.Println(err)
 	}
