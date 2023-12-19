@@ -1,9 +1,9 @@
 package main
 
-import "knot/internal/indexer"
+import "github.com/shtirlic/knot/internal/indexer"
 
 func main() {
 
-	idxr := indexer.NewIndexer("/home/shtirlic/", nil)
-	idxr.Run()
+	indx := indexer.NewIndexer("/home/shtirlic/", nil)
+	indx.Run()
 }

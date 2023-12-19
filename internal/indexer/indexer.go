@@ -2,14 +2,15 @@ package indexer
 
 import (
 	"fmt"
-	"hash/fnv"
 	"log"
 	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
 
-	"knot/internal/store"
+	"github.com/cespare/xxhash/v2"
+
+	"github.com/shtirlic/knot/internal/store"
 )
 
 type Indexer struct {
@@ -111,7 +112,7 @@ func (indexer *Indexer) Run() {
 			idxFileSize++
 		}
 
-		objInfo.Hash = hash(objInfo.String())
+		objInfo.Hash = strconv.FormatUint(xxhash.Sum64String(objInfo.String()), 10)
 		keyName := fmt.Sprintf("%s_%s", objInfo.Type, path)
 		itemList[keyName] = objInfo
 
@@ -131,13 +132,4 @@ func (indexer *Indexer) Run() {
 		log.Println(err)
 	}
 	log.Println(all)
-}
-
-func hash(s string) string {
-	h := fnv.New32a()
-	_, err := h.Write([]byte(s))
-	if err != nil {
-		return ""
-	}
-	return strconv.Itoa(int(h.Sum32()))
 }
