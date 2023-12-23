@@ -126,9 +126,9 @@ func (indexer *Indexer) Run() {
 
 	log.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
 
-	all, err := s.GetAll()
+	_, err = s.GetAll()
 	if err != nil {
 		log.Println(err)
 	}
-	log.Println(all)
+	log.Println(s.Info())
 }
