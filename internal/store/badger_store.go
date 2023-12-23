@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"log"
 
 	"github.com/dgraph-io/badger/v4"
@@ -20,8 +21,16 @@ func NewBadgerStore(storePath string, inMemory bool) *BadgerStore {
 	}
 }
 
+func NewDiskBadgerStore(storePath string) *BadgerStore {
+	return NewBadgerStore(storePath, false)
+}
+
 func NewInMemoryBadgerStore() *BadgerStore {
 	return NewBadgerStore("", true)
+}
+
+func (s *BadgerStore) Info() string {
+	return fmt.Sprintf("Badger Store memory:%v path:%v", s.inMemory, s.storePath)
 }
 
 func (s *BadgerStore) Open() (err error) {

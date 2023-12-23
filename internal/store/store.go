@@ -5,4 +5,5 @@ type Store interface {
 	Close() error
 	Add(map[string]ItemInfo)
 	GetAll() ([]*ItemInfo, error)
+	Info() string
 }
