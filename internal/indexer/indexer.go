@@ -1,7 +1,6 @@
 package indexer
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -14,11 +13,12 @@ import (
 )
 
 type Indexer struct {
-	RootPath       string
-	ExcludeFilters []string
+	RootPath           string
+	ExcludeDirFilters  []string
+	ExcludeFileFilters []string
 }
 
-func defaultExcludeFilters() []string {
+func DefaultExcludeDirFilters() []string {
 	return []string{
 		"po",
 
@@ -75,15 +75,108 @@ func defaultExcludeFilters() []string {
 		".config",
 	}
 }
+func DefaultExcludeFileFilters() []string {
+	return []string{
+		"*~",
+		"*.part",
 
-func NewIndexer(rootPath string, excludeFilter []string) *Indexer {
+		// temporary build files
+		"*.o",
+		"*.la",
+		"*.lo",
+		"*.loT",
+		"*.moc",
+		"moc_*.cpp",
+		"qrc_*.cpp",
+		"ui_*.h",
+		"cmake_install.cmake",
+		"CMakeCache.txt",
+		"CTestTestfile.cmake",
+		"libtool",
+		"config.status",
+		"confdefs.h",
+		"autom4te",
+		"conftest",
+		"confstat",
+		"Makefile.am",
+		"*.gcode", // CNC machine/3D printer toolpath files
+		".ninja_deps",
+		".ninja_log",
+		"build.ninja",
 
-	if len(excludeFilter) == 0 {
-		excludeFilter = defaultExcludeFilters()
+		// misc
+		"*.csproj",
+		"*.m4",
+		"*.rej",
+		"*.gmo",
+		"*.pc",
+		"*.omf",
+		"*.aux",
+		"*.tmp",
+		"*.po",
+		"*.vm*",
+		"*.nvram",
+		"*.rcore",
+		"*.swp",
+		"*.swap",
+		"lzo",
+		"litmain.sh",
+		"*.orig",
+		".histfile.*",
+		".xsession-errors*",
+		"*.map",
+		"*.so",
+		"*.a",
+		"*.db",
+		"*.qrc",
+		"*.ini",
+		"*.init",
+		"*.img",      // typical extension for raw disk images
+		"*.vdi",      // Virtualbox disk images
+		"*.vbox*",    // Virtualbox VM files
+		"vbox.log",   // Virtualbox log files
+		"*.qcow2",    // QEMU QCOW2 disk images
+		"*.vmdk",     // VMware disk images
+		"*.vhd",      // Hyper-V disk images
+		"*.vhdx",     // Hyper-V disk images
+		"*.sql",      // SQL database dumps
+		"*.sql.gz",   // Compressed SQL database dumps
+		"*.ytdl",     // youtube-dl temp files
+		"*.tfstate*", // Terraform state files
+
+		// Bytecode files
+		"*.class", // Java
+		"*.pyc",   // Python
+		"*.pyo",   // More Python
+		"*.elc",   // Emacs Lisp
+		"*.qmlc",  // QML
+		"*.jsc",   // Javascript
+
+		// files known in bioinformatics containing huge amount of unindexable data
+		"*.fastq",
+		"*.fq",
+		"*.gb",
+		"*.fasta",
+		"*.fna",
+		"*.gbff",
+		"*.faa",
+		"*.fna",
 	}
+}
+
+func NewIndexer(rootPath string, excludeDirFilter []string, excludeFileFilter []string) *Indexer {
+
+	if len(excludeDirFilter) == 0 {
+		excludeDirFilter = DefaultExcludeDirFilters()
+	}
+	if len(excludeFileFilter) == 0 {
+		excludeFileFilter = DefaultExcludeFileFilters()
+	}
+
 	return &Indexer{
-		RootPath:       rootPath,
-		ExcludeFilters: excludeFilter,
+		RootPath:           rootPath,
+		ExcludeDirFilters:  excludeDirFilter,
+		ExcludeFileFilters: excludeFileFilter,
 	}
 }
 
@@ -93,9 +186,25 @@ func (indexer *Indexer) Run() {
 	idxFileSize := 0
 	itemList := make(map[string]store.ItemInfo)
 	err := filepath.Walk(indexer.RootPath, func(path string, info os.FileInfo, err error) error {
-		if slices.Contains(indexer.ExcludeFilters, info.Name()) {
+
+		// TODO: Add to failed item list
+		// Skip access denied etc.
+		if err != nil {
+			log.Println("Inside Walk:", err, path)
 			return filepath.SkipDir
 		}
+
+		// Skip dirs via exclude dir filters
+		if info.IsDir() && slices.Contains(indexer.ExcludeDirFilters, info.Name()) {
+			return filepath.SkipDir
+		}
+
+		// TODO: Try to use Match for file masks
+		// Skip files via exclude file filters
+		if !info.IsDir() && slices.Contains(indexer.ExcludeFileFilters, info.Name()) {
+			return nil
+		}
+
 		objInfo := store.ItemInfo{
 			Hash:    "",
 			Name:    info.Name(),
@@ -104,21 +213,20 @@ func (indexer *Indexer) Run() {
 			Size:    info.Size(),
 		}
 		if info.IsDir() {
-			objInfo.Type = store.DIR
+			objInfo.Type = store.DirType
 			idxDirSize++
 		} else {
-			objInfo.Type = store.FILE
+			objInfo.Type = store.FileType
 			idxFileSize++
 		}
 		objInfo.Hash = strconv.FormatUint(xxhash.Sum64String(objInfo.String()), 10)
-		keyName := fmt.Sprintf("%s_%s", objInfo.Type, path)
-		itemList[keyName] = objInfo
+		itemList[objInfo.KeyName()] = objInfo
 
 		idxSize++
 		return err
 	})
 	if err != nil {
-		fmt.Println(err)
+		log.Println("After Walk:", err)
 	}
 
 	var s store.Store = store.NewInMemoryBadgerStore()
@@ -131,4 +239,5 @@ func (indexer *Indexer) Run() {
 		log.Println(err)
 	}
 	log.Println(s.Info())
+	// log.Println(all)
 }

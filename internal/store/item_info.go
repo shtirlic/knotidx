@@ -3,6 +3,7 @@ package store
 import (
 	"bytes"
 	"encoding/gob"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -13,8 +14,8 @@ import (
 type ItemType string
 
 const (
-	DIR  ItemType = "dir"
-	FILE ItemType = "file"
+	DirType  ItemType = "dir"
+	FileType ItemType = "file"
 )
 
 type ItemInfo struct {
@@ -34,6 +35,10 @@ func (o *ItemInfo) String() string {
 		o.ModTime.String(),
 		strconv.FormatInt(o.Size, 10),
 	}, "")
+}
+
+func (o *ItemInfo) KeyName() string {
+	return fmt.Sprintf("%s_%s", o.Type, o.Path)
 }
 
 func (o *ItemInfo) Encode() []byte {
