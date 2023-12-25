@@ -19,12 +19,13 @@ const (
 )
 
 type ItemInfo struct {
-	Name    string
-	Path    string
-	Type    ItemType
-	ModTime time.Time
-	Size    int64
-	Hash    string
+	Name     string
+	Path     string
+	Type     ItemType
+	MimeType string
+	ModTime  time.Time
+	Size     int64
+	Hash     string
 }
 
 func (o *ItemInfo) String() string {
@@ -32,6 +33,7 @@ func (o *ItemInfo) String() string {
 	return strings.Join([]string{
 		o.Path,
 		string(o.Type),
+		o.MimeType,
 		o.ModTime.String(),
 		strconv.FormatInt(o.Size, 10),
 	}, "")
