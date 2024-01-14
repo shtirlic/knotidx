@@ -6,11 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strconv"
-
-	"github.com/cespare/xxhash/v2"
 
 	"github.com/shtirlic/knot/internal/store"
+)
+
+const (
+	DirType  store.ItemType = "dir"
+	FileType store.ItemType = "file"
 )
 
 type FsIndexer struct {
@@ -228,18 +230,24 @@ func (indexer *FsIndexer) Run(s store.Store) {
 			Size:    info.Size(),
 		}
 		if info.IsDir() {
-			objInfo.Type = store.DirType
+			objInfo.Type = DirType
 			objInfo.MimeType = ""
 			idxDirSize++
 		} else {
-			objInfo.Type = store.FileType
+			objInfo.Type = FileType
 			objInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
 			idxFileSize++
 		}
-		objInfo.Hash = strconv.FormatUint(xxhash.Sum64String(objInfo.String()), 10)
+		objInfo.Hash = objInfo.XXhash()
 		itemList[objInfo.KeyName()] = objInfo
 
 		idxSize++
+
+		// log.Println(len(itemList))
+		if len(itemList) > 100 {
+			s.Add(itemList)
+			clear(itemList)
+		}
 		return err
 	})
 	if err != nil {
@@ -247,14 +255,17 @@ func (indexer *FsIndexer) Run(s store.Store) {
 	}
 
 	// var s store.Store = store.NewInMemoryBadgerStore()
-	s.Add(itemList)
+	if len(itemList) > 0 {
+		log.Println(len(itemList))
+		s.Add(itemList)
+	}
 
 	log.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
 
-	all, err := s.GetAll()
+	// _, err = s.GetAll()
 	if err != nil {
 		log.Println(err)
 	}
 	log.Println(s.Info())
-	log.Println(all)
+	// log.Println(all)
 }

@@ -8,15 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dgraph-io/badger/v4"
+	"github.com/cespare/xxhash/v2"
 )
 
 type ItemType string
-
-const (
-	DirType  ItemType = "dir"
-	FileType ItemType = "file"
-)
 
 type ItemInfo struct {
 	Name     string
@@ -26,6 +21,10 @@ type ItemInfo struct {
 	ModTime  time.Time
 	Size     int64
 	Hash     string
+}
+
+func (o *ItemInfo) XXhash() string {
+	return strconv.FormatUint(xxhash.Sum64String(o.String()), 16)
 }
 
 func (o *ItemInfo) String() string {
@@ -62,16 +61,4 @@ func (o *ItemInfo) Decode(data []byte) {
 		return
 	}
 
-}
-
-func Item(item *badger.Item) *ItemInfo {
-	obj := &ItemInfo{}
-	err := item.Value(func(v []byte) error {
-		obj.Decode(v)
-		return nil
-	})
-	if err != nil {
-		return &ItemInfo{}
-	}
-	return obj
 }

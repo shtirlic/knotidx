@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/dgraph-io/badger/v4"
+	"github.com/dgraph-io/badger/v4/options"
 )
 
 type BadgerStore struct {
@@ -37,7 +38,18 @@ func (s *BadgerStore) Open() (err error) {
 	if s.db != nil {
 		return
 	}
-	s.db, err = badger.Open(badger.DefaultOptions(s.storePath).WithInMemory(s.inMemory))
+	opts := badger.DefaultOptions(s.storePath)
+	opts.NumMemtables = 3
+	opts.NumLevelZeroTables = 3
+	opts.NumLevelZeroTablesStall = 6
+	opts.NumCompactors = 2
+	opts.BlockCacheSize = 0
+	opts.Compression = options.None
+	opts.MemTableSize = 8 << 20
+	opts.IndexCacheSize = 16 << 20
+	opts.ValueLogFileSize = 256 << 20
+	opts.Logger = nil
+	s.db, err = badger.Open(opts.WithInMemory(s.inMemory))
 	if err != nil {
 		log.Println(err)
 	}
@@ -58,6 +70,7 @@ func (s *BadgerStore) Close() (err error) {
 func (s *BadgerStore) Add(updates map[string]ItemInfo) {
 	s.Open()
 	txn := s.db.NewTransaction(true)
+	defer txn.Discard()
 	for k, v := range updates {
 		if err := txn.Set([]byte(k), v.Encode()); errors.Is(err, badger.ErrTxnTooBig) {
 			_ = txn.Commit()
@@ -66,7 +79,6 @@ func (s *BadgerStore) Add(updates map[string]ItemInfo) {
 		}
 	}
 	_ = txn.Commit()
-	return
 }
 
 func (s *BadgerStore) GetAll() (items []*ItemInfo, err error) {
@@ -87,4 +99,16 @@ func (s *BadgerStore) GetAll() (items []*ItemInfo, err error) {
 		log.Println(err)
 	}
 	return
+}
+
+func Item(item *badger.Item) *ItemInfo {
+	obj := &ItemInfo{}
+	err := item.Value(func(v []byte) error {
+		obj.Decode(v)
+		return nil
+	})
+	if err != nil {
+		return &ItemInfo{}
+	}
+	return obj
 }
