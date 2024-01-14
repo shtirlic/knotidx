@@ -60,5 +60,4 @@ func (o *ItemInfo) Decode(data []byte) {
 	if err != nil {
 		return
 	}
-
 }

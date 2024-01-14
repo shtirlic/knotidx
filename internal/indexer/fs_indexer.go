@@ -1,7 +1,9 @@
 package indexer
 
 import (
+	"fmt"
 	"log"
+	"log/slog"
 	"mime"
 	"os"
 	"path/filepath"
@@ -15,23 +17,21 @@ const (
 	FileType store.ItemType = "file"
 )
 
-type FsIndexer struct {
+type FileSystemIndexer struct {
 	RootPath           string
 	ExcludeDirFilters  []string
 	ExcludeFileFilters []string
 }
 
-func (indexer *FsIndexer) ModifiedIndex(s store.Store) {
+func (indexer *FileSystemIndexer) NewItemInfo() store.ItemInfo {
+	return store.ItemInfo{}
+}
+func (indexer *FileSystemIndexer) ModifiedIndex(s store.Store) {
 	// TODO implement me
 	panic("implement me")
 }
 
-func (indexer *FsIndexer) NewIndex(s store.Store) {
-	// TODO implement me
-	panic("implement me")
-}
-
-func (indexer *FsIndexer) Config() *Config {
+func (indexer *FileSystemIndexer) Config() *Config {
 	return &Config{Name: "fs indexer", Params: map[string]string{}}
 }
 
@@ -181,7 +181,7 @@ func DefaultExcludeFileFilters() []string {
 	}
 }
 
-func NewFsIndexer(rootPath string, excludeDirFilter []string, excludeFileFilter []string) *FsIndexer {
+func NewFileSystemIndexer(rootPath string, excludeDirFilter []string, excludeFileFilter []string) Indexer {
 
 	if len(excludeDirFilter) == 0 {
 		excludeDirFilter = DefaultExcludeDirFilters()
@@ -190,19 +190,43 @@ func NewFsIndexer(rootPath string, excludeDirFilter []string, excludeFileFilter 
 		excludeFileFilter = DefaultExcludeFileFilters()
 	}
 
-	return &FsIndexer{
-		RootPath:           rootPath,
+	return &FileSystemIndexer{
+		RootPath:           filepath.Clean(rootPath),
 		ExcludeDirFilters:  excludeDirFilter,
 		ExcludeFileFilters: excludeFileFilter,
 	}
 }
 
-func (indexer *FsIndexer) Run(s store.Store) {
+func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
+
+	var err error
+	path, err := os.Stat(indexer.RootPath)
+	if err != nil {
+		log.Println("Can't get fileinfo:", err, path)
+	}
+
+	rootFileInfo := store.ItemInfo{
+		Name: path.Name(),
+		Path: indexer.RootPath,
+		Type: func() store.ItemType {
+			if path.IsDir() {
+				return DirType
+			}
+			return FileType
+		}(),
+	}
+	if s.Find(rootFileInfo) != nil {
+		slog.Info("already in index, skipping", "key", rootFileInfo.KeyName())
+		return
+	} else {
+		slog.Info("not found in index, adding", "key", rootFileInfo.KeyName())
+	}
+
 	idxSize := 0
 	idxDirSize := 0
 	idxFileSize := 0
 	itemList := make(map[string]store.ItemInfo)
-	err := filepath.Walk(indexer.RootPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(indexer.RootPath, func(path string, info os.FileInfo, err error) error {
 
 		// TODO: Add to failed item list
 		// Skip access denied etc.
@@ -216,7 +240,7 @@ func (indexer *FsIndexer) Run(s store.Store) {
 			return filepath.SkipDir
 		}
 
-		// TODO: Try to use Match for file masks
+		// TODO: Try to use Match/Glob for file masks
 		// Skip files via exclude file filters
 		if !info.IsDir() && slices.Contains(indexer.ExcludeFileFilters, info.Name()) {
 			return nil
@@ -228,22 +252,28 @@ func (indexer *FsIndexer) Run(s store.Store) {
 			Path:    path,
 			ModTime: info.ModTime(),
 			Size:    info.Size(),
+			Type: func() store.ItemType {
+				if info.IsDir() {
+					idxDirSize++
+					return DirType
+				}
+				idxFileSize++
+				return FileType
+			}(),
 		}
-		if info.IsDir() {
-			objInfo.Type = DirType
-			objInfo.MimeType = ""
-			idxDirSize++
-		} else {
-			objInfo.Type = FileType
-			objInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
-			idxFileSize++
-		}
-		objInfo.Hash = objInfo.XXhash()
-		itemList[objInfo.KeyName()] = objInfo
 
+		// Get the mimetype for file by extension
+		if objInfo.Type == FileType {
+			objInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
+		}
+		// Calc hash
+		objInfo.Hash = objInfo.XXhash()
+
+		// Add to items list
+		itemList[objInfo.KeyName()] = objInfo
 		idxSize++
 
-		// log.Println(len(itemList))
+		// Add items to store in batch per 100 items
 		if len(itemList) > 100 {
 			s.Add(itemList)
 			clear(itemList)
@@ -254,18 +284,16 @@ func (indexer *FsIndexer) Run(s store.Store) {
 		log.Println("After Walk:", err)
 	}
 
-	// var s store.Store = store.NewInMemoryBadgerStore()
+	// Add remaining items after batch inserts
 	if len(itemList) > 0 {
-		log.Println(len(itemList))
 		s.Add(itemList)
 	}
 
-	log.Printf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
+	addInfo := fmt.Sprintf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
+	slog.Info(addInfo)
 
-	// _, err = s.GetAll()
 	if err != nil {
 		log.Println(err)
 	}
-	log.Println(s.Info())
-	// log.Println(all)
+	slog.Debug(s.Info())
 }
