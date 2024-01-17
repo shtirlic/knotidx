@@ -1,11 +1,11 @@
 # Maintainer: Serg Podtynnyi <serg@podtynnyi.com>
-pkgname=knotd
-pkgver=0.1.r1.96f7524
+pkgname=knotd-git
+pkgver=0.1.r2.4a27e24
 pkgrel=1
 pkgdesc=""
 arch=('1686' 'x86_64' 'armv7h' 'armv6h' 'aarch64')
 url="https://github.com/shtirlic/knot"
-source=("${pkgname}-git::git+ssh://git@github.com/shtirlic/knot")
+source=("${pkgname}::git+ssh://git@github.com/shtirlic/knot")
 license=('GPL')
 depends=()
 makedepends=('git' 'go')
@@ -18,7 +18,7 @@ md5sums=('SKIP')
 validpgpkeys=()
 
 pkgver() {
-  cd "${srcdir}/${pkgname}-git"
+  cd "${srcdir}/${pkgname}"
   (
     set -o pipefail
     git describe --long --tags 2> /dev/null | sed "s/^[A-Za-z\.\-]*//;s/\([^-]*-\)g/r\1/;s/-/./g" ||
@@ -27,7 +27,7 @@ pkgver() {
 }
 
 build() {
-  cd "${srcdir}/${pkgname}-git"
+  cd "${srcdir}/${pkgname}"
 	export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
@@ -37,7 +37,7 @@ build() {
 }
 
 package() {
-	cd "${srcdir}/${pkgname}-git"
+	cd "${srcdir}/${pkgname}"
   install -Dm755 "knotd" ${pkgdir}/usr/bin/knotd
 	install -Dm755 "knotctl" ${pkgdir}/usr/bin/knotctl
 }
