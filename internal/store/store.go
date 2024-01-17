@@ -15,7 +15,7 @@ type Store interface {
 	Find(ItemInfo) *ItemInfo
 	GetAllKeys() []string
 
-	Add(map[string]ItemInfo)
+	Add(map[string]ItemInfo) error
 	GetAll() ([]*ItemInfo, error)
 }
 
@@ -23,8 +23,8 @@ type DatabaseType string
 
 func NewStore(c config.StoreConfig) (s Store, err error) {
 
-	switch c.Type {
-	case string(BadgerDatabaseType):
+	switch DatabaseType(c.Type) {
+	case BadgerDatabaseType:
 		if c.Path != "" {
 			s = NewDiskBadgerStore(c.Path)
 		} else {

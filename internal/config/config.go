@@ -40,7 +40,7 @@ type Config struct {
 	Knotctl KnotctlConfig
 }
 
-func DefaultConfig() *Config {
+func DefaultConfig() Config {
 	conf := Config{
 		Knotd: KnotdConfig{
 			Interval: 5,
@@ -49,20 +49,20 @@ func DefaultConfig() *Config {
 			},
 		},
 	}
-	return &conf
+	return conf
 }
 
-func (c *Config) Load() (*Config, error) {
+func (c Config) Load() (Config, error) {
 	slog.Info("Config Load", "path", configFile)
 	configData, err := os.ReadFile(configFile)
 	if err != nil {
-		return nil, err
+		return c, err
 	}
-	meta, err := toml.Decode(string(configData), c)
+	meta, err := toml.Decode(string(configData), &c)
 	if err != nil {
-		return nil, err
+		return c, err
 	}
 	slog.Debug("Config load", "meta", meta)
-	slog.Debug("Config Load", "config", *c)
+	slog.Debug("Config Load", "config", c)
 	return c, err
 }

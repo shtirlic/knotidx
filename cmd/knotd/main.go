@@ -7,13 +7,19 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"runtime/pprof"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/shtirlic/knot/internal/config"
+	"github.com/shtirlic/knot/internal/idle"
 	"github.com/shtirlic/knot/internal/indexer"
 	"github.com/shtirlic/knot/internal/store"
+)
+
+const (
+	idleThreshold   = 90.0 // idle percentage
+	triggerInterval = 1 * time.Hour
 )
 
 var (
@@ -21,17 +27,15 @@ var (
 	programExitCode = 1                  // Exit code set to 1 by default
 	programLevel    = new(slog.LevelVar) // Info by default
 
-	gConf  *config.Config
+	ticker *time.Ticker
+	gConf  config.Config
 	gStore store.Store
+	wg     sync.WaitGroup
+
+	lastTriggerTime time.Time
 
 	// command      = flag.String("s", "", "startup command")
 )
-
-func addToIndex(s store.Store, path string) {
-	slog.Info("Starting addToIndex", "path", path, "store", s)
-	idx := indexer.NewIndexer(path)
-	idx.NewIndex(s)
-}
 
 func main() {
 	flag.Parse()
@@ -47,72 +51,90 @@ func main() {
 	defer cpuprofile()()
 
 	// Handle shutdown
-	defer func() {
-		slog.Info("Stiopping knotd")
-		if programErr != nil && programExitCode != 0 {
-			slog.Error("exit", "error", programErr)
-		}
-		memprofile()
-		os.Exit(programExitCode)
-	}()
+	defer shutdown()
 
-	// Load default config and file config
-	if gConf, programErr = reloadConfig(); programErr != nil {
+	// Set channel notify for singals
+	sigCh := watchSignals()
+
+	// Load configs and open store
+	if gConf, gStore, programErr = startUp(); programErr != nil {
 		return
 	}
 
-	// watch for singals
-	sgsCh := watchSignals()
+	// Start background ticker
+	ticker = newTicker(time.Duration(gConf.Knotd.Interval))
 
-	// start background ticker
-	ticker := time.NewTicker(time.Second * time.Duration(gConf.Knotd.Interval))
-	defer ticker.Stop()
+	// Quit channel
+	quit := make(chan bool)
 
-	// Open the store
-	if gStore, programErr = NewGlobalStore(); programErr != nil {
-		return
-	}
-	defer gStore.Close()
-
-	// Starting the main daemon loop
-	// waiting for background events or os signals
-loop:
+	// Start the main daemon loop
+	// Wait for background events and OS signals
 	for {
 		select {
 		case <-ticker.C:
-			slog.Debug("Got work?")
-			addIndexers()
-		case sig := <-sgsCh:
+			// Do periodic work
+			tick()
+		case sig := <-sigCh:
 			// Handle recieved signals
 			_, exit, err := handleSginal(sig)
 			if err != nil {
 				programExitCode = exit
 				programErr = err
-				break loop
+				close(quit)
 			}
+		case <-quit:
+			return
 		}
 	}
 }
 
-func addIndexers() {
-	for _, idx := range gConf.Knotd.Indexer {
-		for _, path := range idx.Paths {
-			go addToIndex(gStore, path)
-		}
-	}
+func newTicker(t time.Duration) *time.Ticker {
+	return time.NewTicker(time.Second * t)
 }
 
-// Create and Open the store
-func NewGlobalStore() (s store.Store, err error) {
-	if s, err = store.NewStore(gConf.Knotd.Store); err != nil {
-		slog.Error("Can't create/open the store", "store", gStore, "error", err)
-		return
+func tick() {
+	slog.Debug("Got work?")
+	scheduleWork()
+}
+
+func scheduleWork() {
+	idleTime := idle.Idle()
+
+	slog.Debug("Load AVG", "load", idle.SysinfoAvg())
+	slog.Info("Idle time", "idle", idleTime)
+	slog.Debug("Last work was at:", "date", lastTriggerTime)
+
+	if idleTime >= idleThreshold && time.Since(lastTriggerTime) >= triggerInterval {
+		lastTriggerTime = time.Now()
+		slog.Info("Doing work 1 time per hour")
+		addIndexers(gConf.Knotd.Indexer, gStore)
 	}
-	return
+
+}
+
+func addToIndex(idx indexer.Indexer) {
+	defer wg.Done()
+
+	slog.Info("Starting addToIndex", "type", idx.Type())
+	if err := idx.NewIndex(); err != nil {
+		slog.Error("new index failed", "error", err, "indexer", idx)
+	}
+
+}
+
+func addIndexers(idxConfigs []config.IndexerConfig, s store.Store) {
+	for _, idxConfig := range idxConfigs {
+		for _, idx := range indexer.NewIndexers(idxConfig, s) {
+
+			// Fire goroutines for the actual indexing
+			wg.Add(1)
+			go addToIndex(idx)
+		}
+	}
 }
 
 // (Re)Load default config and file config
-func reloadConfig() (conf *config.Config, err error) {
+func reloadConfig() (conf config.Config, err error) {
 	if conf, err = config.DefaultConfig().Load(); err != nil {
 		slog.Error("Can't read config from toml files", "error", err)
 		return
@@ -120,6 +142,44 @@ func reloadConfig() (conf *config.Config, err error) {
 	return
 }
 
+// Create and Open the store
+func newGlobalStore(conf config.StoreConfig) (s store.Store, err error) {
+	if s, err = store.NewStore(conf); err != nil {
+		slog.Error("Can't create/open the store", "store", s, "error", err)
+		return
+	}
+	return
+}
+
+// Do daemon shutdown
+func shutdown() {
+	slog.Info("Stoopping knotd")
+
+	ticker.Stop()
+	wg.Wait()
+	gStore.Close()
+
+	if programErr != nil && programExitCode != 0 {
+		slog.Error("exit", "error", programErr)
+	}
+	memprofile()
+	os.Exit(programExitCode)
+}
+
+// Startup seq reloading configs and create/open store
+func startUp() (conf config.Config, s store.Store, err error) {
+	// Load default config and file config
+	if conf, err = reloadConfig(); err != nil {
+		return
+	}
+	// Open the store
+	if s, err = newGlobalStore(conf.Knotd.Store); err != nil {
+		return
+	}
+	return
+}
+
+// Calculate the exit code
 func getExitCode(sig os.Signal) int {
 	return 128 + int(sig.(syscall.Signal))
 }
@@ -129,18 +189,26 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	slog.Info("Reloading...")
 	handled = false
 	exit = getExitCode(sig)
-	if gConf, err = reloadConfig(); err != nil {
-		return
-	}
+
+	// stop the background ticker
+	ticker.Stop()
+
+	// wait for indexer tasks to finish
+	wg.Wait()
+
 	if err = gStore.Close(); err != nil {
 		return
 	}
-	if gStore, err = NewGlobalStore(); err != nil {
+	runtime.GC()
+	// memprofile()
+
+	if gConf, gStore, err = startUp(); err != nil {
 		return
 	}
+	ticker.Reset(time.Second * time.Duration(gConf.Knotd.Interval))
+
 	handled = true
 	exit = 0
-	runtime.GC()
 	slog.Info("Reload complete")
 	return
 }
@@ -175,33 +243,4 @@ func watchSignals() (sgsCh chan os.Signal) {
 		syscall.SIGHUP,
 	)
 	return
-}
-
-func cpuprofile() func() {
-	f, err := os.Create("cpuprofile.prof")
-	if err != nil {
-		slog.Error("could not create CPU profile: ", err)
-		os.Exit(1)
-	}
-	if err := pprof.StartCPUProfile(f); err != nil {
-		slog.Error("could not start CPU profile: ", err)
-		os.Exit(1)
-	}
-	return func() {
-		pprof.StopCPUProfile()
-		defer f.Close() // error handling omitted for example
-	}
-}
-
-func memprofile() {
-	f, err := os.Create("memprofile.prof")
-	if err != nil {
-		slog.Error("could not create memory profile: ", err)
-		os.Exit(1)
-	}
-	defer f.Close() // error handling omitted for example
-	runtime.GC()    // get up-to-date statistics
-	if err := pprof.WriteHeapProfile(f); err != nil {
-		slog.Error("could not write memory profile: ", err)
-	}
 }

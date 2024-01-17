@@ -20,7 +20,7 @@ type BadgerStore struct {
 	dbType    DatabaseType
 }
 
-func NewBadgerStore(storePath string, inMemory bool) *BadgerStore {
+func NewBadgerStore(storePath string, inMemory bool) Store {
 	return &BadgerStore{
 		storePath: storePath,
 		inMemory:  inMemory,
@@ -28,11 +28,11 @@ func NewBadgerStore(storePath string, inMemory bool) *BadgerStore {
 	}
 }
 
-func NewDiskBadgerStore(storePath string) *BadgerStore {
+func NewDiskBadgerStore(storePath string) Store {
 	return NewBadgerStore(storePath, false)
 }
 
-func NewInMemoryBadgerStore() *BadgerStore {
+func NewInMemoryBadgerStore() Store {
 	return NewBadgerStore("", true)
 }
 
@@ -69,6 +69,7 @@ func (s *BadgerStore) Open() (err error) {
 }
 
 func (s *BadgerStore) Close() (err error) {
+
 	if s.db == nil {
 		return
 	}
@@ -83,6 +84,7 @@ func (s *BadgerStore) Close() (err error) {
 
 // TODO: Need mutex for read and writes
 func (s *BadgerStore) Reset() (err error) {
+
 	err = s.db.DropAll()
 	if err != nil {
 		slog.Debug("error while reseting store", "store", s, "error", err)
@@ -130,7 +132,7 @@ func (s *BadgerStore) GetAllKeys() []string {
 	return keys
 }
 
-func (s *BadgerStore) Add(updates map[string]ItemInfo) {
+func (s *BadgerStore) Add(updates map[string]ItemInfo) (err error) {
 	s.Open()
 	txn := s.db.NewTransaction(true)
 	defer txn.Discard()
@@ -141,7 +143,8 @@ func (s *BadgerStore) Add(updates map[string]ItemInfo) {
 			_ = txn.Set([]byte(k), v.Encode())
 		}
 	}
-	_ = txn.Commit()
+	err = txn.Commit()
+	return
 }
 
 func (s *BadgerStore) GetAll() (items []*ItemInfo, err error) {

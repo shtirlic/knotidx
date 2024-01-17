@@ -13,14 +13,18 @@ import (
 )
 
 const (
-	DirType  store.ItemType = "dir"
-	FileType store.ItemType = "file"
+	DirItemType  store.ItemType = "dir"
+	FileItemType store.ItemType = "file"
+
+	FsIndexerType IndexerType = "fs"
 )
 
 type FileSystemIndexer struct {
 	RootPath           string
 	ExcludeDirFilters  []string
 	ExcludeFileFilters []string
+	idxType            IndexerType
+	Store              store.Store
 }
 
 func (indexer *FileSystemIndexer) NewItemInfo() store.ItemInfo {
@@ -29,6 +33,10 @@ func (indexer *FileSystemIndexer) NewItemInfo() store.ItemInfo {
 func (indexer *FileSystemIndexer) ModifiedIndex(s store.Store) {
 	// TODO implement me
 	panic("implement me")
+}
+
+func (indexer *FileSystemIndexer) Type() IndexerType {
+	return indexer.idxType
 }
 
 func (indexer *FileSystemIndexer) Config() *Config {
@@ -181,7 +189,7 @@ func DefaultExcludeFileFilters() []string {
 	}
 }
 
-func NewFileSystemIndexer(rootPath string, excludeDirFilter []string, excludeFileFilter []string) Indexer {
+func NewFileSystemIndexer(store store.Store, rootPath string, excludeDirFilter []string, excludeFileFilter []string) Indexer {
 
 	if len(excludeDirFilter) == 0 {
 		excludeDirFilter = DefaultExcludeDirFilters()
@@ -194,28 +202,32 @@ func NewFileSystemIndexer(rootPath string, excludeDirFilter []string, excludeFil
 		RootPath:           filepath.Clean(rootPath),
 		ExcludeDirFilters:  excludeDirFilter,
 		ExcludeFileFilters: excludeFileFilter,
+		idxType:            FsIndexerType,
+		Store:              store,
 	}
 }
 
-func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
+func ItemType(isDir bool) store.ItemType {
+	if isDir {
+		return DirItemType
+	}
+	return FileItemType
+}
 
-	var err error
-	path, err := os.Stat(indexer.RootPath)
+func (idx *FileSystemIndexer) NewIndex() (err error) {
+
+	path, err := os.Stat(idx.RootPath)
 	if err != nil {
-		log.Println("Can't get fileinfo:", err, path)
+		slog.Error("Can't get fileinfo for root path:", "error", err, "path", path)
+		return
 	}
 
 	rootFileInfo := store.ItemInfo{
 		Name: path.Name(),
-		Path: indexer.RootPath,
-		Type: func() store.ItemType {
-			if path.IsDir() {
-				return DirType
-			}
-			return FileType
-		}(),
+		Path: idx.RootPath,
+		Type: ItemType(path.IsDir()),
 	}
-	if s.Find(rootFileInfo) != nil {
+	if idx.Store.Find(rootFileInfo) != nil {
 		slog.Info("already in index, skipping", "key", rootFileInfo.KeyName())
 		return
 	} else {
@@ -226,7 +238,7 @@ func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
 	idxDirSize := 0
 	idxFileSize := 0
 	itemList := make(map[string]store.ItemInfo)
-	err = filepath.Walk(indexer.RootPath, func(path string, info os.FileInfo, err error) error {
+	err = filepath.Walk(idx.RootPath, func(path string, info os.FileInfo, err error) error {
 
 		// TODO: Add to failed item list
 		// Skip access denied etc.
@@ -236,13 +248,13 @@ func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
 		}
 
 		// Skip dirs via exclude dir filters
-		if info.IsDir() && slices.Contains(indexer.ExcludeDirFilters, info.Name()) {
+		if info.IsDir() && slices.Contains(idx.ExcludeDirFilters, info.Name()) {
 			return filepath.SkipDir
 		}
 
 		// TODO: Try to use Match/Glob for file masks
 		// Skip files via exclude file filters
-		if !info.IsDir() && slices.Contains(indexer.ExcludeFileFilters, info.Name()) {
+		if !info.IsDir() && slices.Contains(idx.ExcludeFileFilters, info.Name()) {
 			return nil
 		}
 
@@ -252,19 +264,15 @@ func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
 			Path:    path,
 			ModTime: info.ModTime(),
 			Size:    info.Size(),
-			Type: func() store.ItemType {
-				if info.IsDir() {
-					idxDirSize++
-					return DirType
-				}
-				idxFileSize++
-				return FileType
-			}(),
+			Type:    ItemType(info.IsDir()),
 		}
 
 		// Get the mimetype for file by extension
-		if objInfo.Type == FileType {
+		if objInfo.Type == FileItemType {
+			idxFileSize++
 			objInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
+		} else {
+			idxDirSize++
 		}
 		// Calc hash
 		objInfo.Hash = objInfo.XXhash()
@@ -275,25 +283,32 @@ func (indexer *FileSystemIndexer) NewIndex(s store.Store) {
 
 		// Add items to store in batch per 100 items
 		if len(itemList) > 100 {
-			s.Add(itemList)
+			err = idx.Store.Add(itemList)
+			if err != nil {
+				slog.Error("can't add items to store")
+				return err
+			}
 			clear(itemList)
 		}
 		return err
 	})
 	if err != nil {
 		log.Println("After Walk:", err)
+		return
 	}
 
 	// Add remaining items after batch inserts
 	if len(itemList) > 0 {
-		s.Add(itemList)
+		err = idx.Store.Add(itemList)
+		if err != nil {
+			slog.Error("can't add items to store")
+			return
+		}
 	}
 
 	addInfo := fmt.Sprintf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
 	slog.Info(addInfo)
 
-	if err != nil {
-		log.Println(err)
-	}
-	slog.Debug(s.Info())
+	slog.Debug(idx.Store.Info())
+	return
 }
