@@ -1,6 +1,6 @@
 # Maintainer: Serg Podtynnyi <serg@podtynnyi.com>
 pkgname=knotd
-pkgver=0.1.r0.648bde0
+pkgver=0.1.r1.96f7524
 pkgrel=1
 pkgdesc=""
 arch=('1686' 'x86_64' 'armv7h' 'armv6h' 'aarch64')
@@ -27,7 +27,7 @@ pkgver() {
 }
 
 build() {
-	cd "${pkgname}-${pkgver}"
+  cd "${srcdir}/${pkgname}-git"
 	export CGO_CPPFLAGS="${CPPFLAGS}"
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
@@ -37,6 +37,7 @@ build() {
 }
 
 package() {
-  install -Dm755 "${pkgname}-${pkgver}/knotd" ${pkgdir}/usr/bin/knotd
-	install -Dm755 "${pkgname}-${pkgver}/knotctl" ${pkgdir}/usr/bin/knotctl
+	cd "${srcdir}/${pkgname}-git"
+  install -Dm755 "knotd" ${pkgdir}/usr/bin/knotd
+	install -Dm755 "knotctl" ${pkgdir}/usr/bin/knotctl
 }
