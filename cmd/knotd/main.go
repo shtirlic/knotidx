@@ -23,6 +23,10 @@ const (
 )
 
 var (
+	version = "development"
+	commit  string
+	date    = time.Now().String()
+
 	programErr      error
 	programExitCode = 1                  // Exit code set to 1 by default
 	programLevel    = new(slog.LevelVar) // Info by default
@@ -45,6 +49,7 @@ func main() {
 	programLevel.Set(slog.LevelDebug)
 
 	slog.Info("Starting knotd")
+	slog.Info("Build", "version", version, "commit", commit, "date", date)
 
 	// profile
 	// debug.SetMemoryLimit(64 << 20)
