@@ -1,50 +1,38 @@
 # Maintainer: Serg Podtynnyi <serg@podtynnyi.com>
 pkgname=knotd
-pkgver=0.1
+pkgver=r15.767cad1
 pkgrel=1
-epoch=
 pkgdesc=""
-arch=(x86_64)
+arch=('1686' 'x86_64' 'armv7h' 'armv6h' 'aarch64')
 url="https://github.com/shtirlic/knot"
 license=('GPL')
-groups=()
 depends=()
 makedepends=('git' 'go')
 checkdepends=()
 optdepends=()
-provides=()
-conflicts=()
-replaces=()
-backup=()
-options=()
-install=
+# install=${pkgname}.install
 changelog=
-source=("git://github.com/shtirlic/knot")
+source=("${pkgname}-${pkgver}::git+ssh://git@github.com/shtirlic/knot")
 noextract=()
-md5sums=()
+md5sums=('SKIP')
 validpgpkeys=()
 
 pkgver() {
-    cd "$srcdir/"
-    printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
-}
-
-prepare() {
-	cd "$pkgname-$pkgver"
-	patch -p1 -i "$srcdir/$pkgname-$pkgver.patch"
+  cd "${pkgname}-${pkgver}"
+  printf "r%s.%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
 }
 
 build() {
-	cd "$pkgname-$pkgver"
-	 go build ./cmd/knotd
-}
-
-check() {
-	cd "$pkgname-$pkgver"
-	# make -k check
+	cd "${pkgname}-${pkgver}"
+	export CGO_CPPFLAGS="${CPPFLAGS}"
+  export CGO_CFLAGS="${CFLAGS}"
+  export CGO_CXXFLAGS="${CXXFLAGS}"
+	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
+	go build -o knotd -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}" cmd/knotd/*.go
+	go build -o knotctl -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}" cmd/knotctl/*.go
 }
 
 package() {
-	cd "$pkgname-$pkgver"
-	install -Dm755 "$srcdir/package/knotd" "$pkgdir/usr/bin/knotd"
+  install -Dm755 "${pkgname}-${pkgver}/knotd" ${pkgdir}/usr/bin/knotd
+	install -Dm755 "${pkgname}-${pkgver}/knotctl" ${pkgdir}/usr/bin/knotctl
 }
