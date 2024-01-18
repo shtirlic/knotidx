@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	configFile = "configs/knot.toml"
+	configFile = "configs/knotidx.toml"
 )
 
 type IndexerConfig struct {
