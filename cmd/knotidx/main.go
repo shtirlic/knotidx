@@ -11,10 +11,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/shtirlic/knot/internal/config"
-	"github.com/shtirlic/knot/internal/idle"
-	"github.com/shtirlic/knot/internal/indexer"
-	"github.com/shtirlic/knot/internal/store"
+	"github.com/shtirlic/knotidx/internal/config"
+	"github.com/shtirlic/knotidx/internal/idle"
+	"github.com/shtirlic/knotidx/internal/indexer"
+	"github.com/shtirlic/knotidx/internal/store"
 )
 
 const (
@@ -48,7 +48,7 @@ func main() {
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: programLevel})))
 	programLevel.Set(slog.LevelDebug)
 
-	slog.Info("Starting knotd")
+	slog.Info("Starting knotidx")
 	slog.Info("Build", "version", version, "commit", commit, "date", date)
 
 	// profile
@@ -67,7 +67,7 @@ func main() {
 	}
 
 	// Start background ticker
-	ticker = newTicker(time.Duration(gConf.Knotd.Interval))
+	ticker = newTicker(time.Duration(gConf.Knotidx.Interval))
 
 	// Quit channel
 	quit := make(chan bool)
@@ -112,7 +112,7 @@ func scheduleWork() {
 	if idleTime >= idleThreshold && time.Since(lastTriggerTime) >= triggerInterval {
 		lastTriggerTime = time.Now()
 		slog.Info("Doing work 1 time per hour")
-		addIndexers(gConf.Knotd.Indexer, gStore)
+		addIndexers(gConf.Knotidx.Indexer, gStore)
 	}
 
 }
@@ -158,7 +158,7 @@ func newGlobalStore(conf config.StoreConfig) (s store.Store, err error) {
 
 // Do daemon shutdown
 func shutdown() {
-	slog.Info("Stoopping knotd")
+	slog.Info("Stoopping knotidx")
 
 	ticker.Stop()
 	wg.Wait()
@@ -178,7 +178,7 @@ func startUp() (conf config.Config, s store.Store, err error) {
 		return
 	}
 	// Open the store
-	if s, err = newGlobalStore(conf.Knotd.Store); err != nil {
+	if s, err = newGlobalStore(conf.Knotidx.Store); err != nil {
 		return
 	}
 	return
@@ -210,7 +210,7 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	if gConf, gStore, err = startUp(); err != nil {
 		return
 	}
-	ticker.Reset(time.Second * time.Duration(gConf.Knotd.Interval))
+	ticker.Reset(time.Second * time.Duration(gConf.Knotidx.Interval))
 
 	handled = true
 	exit = 0

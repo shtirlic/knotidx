@@ -3,8 +3,8 @@ package indexer
 import (
 	"log/slog"
 
-	"github.com/shtirlic/knot/internal/config"
-	"github.com/shtirlic/knot/internal/store"
+	"github.com/shtirlic/knotidx/internal/config"
+	"github.com/shtirlic/knotidx/internal/store"
 )
 
 type Indexer interface {

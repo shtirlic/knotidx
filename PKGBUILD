@@ -1,11 +1,11 @@
 # Maintainer: Serg Podtynnyi <serg@podtynnyi.com>
-pkgname=knotd-git
-pkgver=0.1.r2.4a27e24
+pkgname=knotidx-git
+pkgver=0.1.r3.a24d652
 pkgrel=1
 pkgdesc=""
 arch=('1686' 'x86_64' 'armv7h' 'armv6h' 'aarch64')
-url="https://github.com/shtirlic/knot"
-source=("${pkgname}::git+ssh://git@github.com/shtirlic/knot")
+url="https://github.com/shtirlic/knotidx"
+source=("${pkgname}::git+ssh://git@github.com/shtirlic/knotidx")
 license=('GPL')
 depends=()
 makedepends=('git' 'go')
@@ -32,12 +32,10 @@ build() {
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
 	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-	go build -o knotd -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}  -X main.date=$(date -u +%Y%m%d.%H%M%S) -X main.commit=$(git rev-parse --short HEAD)" cmd/knotd/*
-	go build -o knotctl -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}  -X main.date=$(date -u +%Y%m%d.%H%M%S) -X main.commit=$(git rev-parse --short HEAD)" cmd/knotctl/*
+	go build -o knotidx -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}  -X main.date=$(date -u +%Y%m%d.%H%M%S) -X main.commit=$(git rev-parse --short HEAD)" cmd/knotidx/*
 }
 
 package() {
 	cd "${srcdir}/${pkgname}"
-  install -Dm755 "knotd" ${pkgdir}/usr/bin/knotd
-	install -Dm755 "knotctl" ${pkgdir}/usr/bin/knotctl
+  install -Dm755 "knotidx" ${pkgdir}/usr/bin/knotidx
 }

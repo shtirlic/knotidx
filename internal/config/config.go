@@ -28,7 +28,7 @@ type GeneralConfig struct {
 type KnotctlConfig struct {
 }
 
-type KnotdConfig struct {
+type KnotidxConfig struct {
 	Interval int
 	Store    StoreConfig
 	Indexer  []IndexerConfig
@@ -36,13 +36,13 @@ type KnotdConfig struct {
 
 type Config struct {
 	General GeneralConfig
-	Knotd   KnotdConfig
+	Knotidx KnotidxConfig
 	Knotctl KnotctlConfig
 }
 
 func DefaultConfig() Config {
 	conf := Config{
-		Knotd: KnotdConfig{
+		Knotidx: KnotidxConfig{
 			Interval: 5,
 			Store: StoreConfig{
 				Type: "badger",

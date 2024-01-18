@@ -3,7 +3,7 @@ package store
 import (
 	"fmt"
 
-	"github.com/shtirlic/knot/internal/config"
+	"github.com/shtirlic/knotidx/internal/config"
 )
 
 type Store interface {

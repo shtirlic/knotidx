@@ -1,4 +1,4 @@
-module github.com/shtirlic/knot
+module github.com/shtirlic/knotidx
 
 go 1.21
 

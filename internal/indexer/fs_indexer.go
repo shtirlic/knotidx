@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 
-	"github.com/shtirlic/knot/internal/store"
+	"github.com/shtirlic/knotidx/internal/store"
 )
 
 const (
