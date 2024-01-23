@@ -8,11 +8,11 @@ import (
 )
 
 type Indexer interface {
-	Config() *Config
-	ModifiedIndex(store.Store)
-	NewIndex() error
-	NewItemInfo() store.ItemInfo
+	Config() *Config // not used for now
+	UpdateIndex() error
+	CleanIndex(prefix string) error
 	Type() IndexerType
+	Watch(quit chan bool)
 }
 
 type IndexerType string
@@ -27,7 +27,7 @@ func NewIndexers(c config.IndexerConfig, s store.Store) []Indexer {
 	for _, path := range c.Paths {
 		switch IndexerType(c.Type) {
 		case FsIndexerType:
-			indexers = append(indexers, NewFileSystemIndexer(s, path, nil, nil))
+			indexers = append(indexers, NewFileSystemIndexer(s, path, c.Notify, nil, nil))
 		default:
 			slog.Warn("indexer type is unknown", "type", c.Type)
 		}

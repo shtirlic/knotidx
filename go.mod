@@ -6,6 +6,13 @@ require (
 	github.com/BurntSushi/toml v1.3.2
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/dgraph-io/badger/v4 v4.2.0
+	github.com/fsnotify/fsnotify v1.7.0
+	google.golang.org/protobuf v1.32.0
+)
+
+require (
+	golang.org/x/text v0.14.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20231002182017-d307bd883b97 // indirect
 )
 
 require (
@@ -22,5 +29,5 @@ require (
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
 	golang.org/x/sys v0.16.0 // indirect
-	google.golang.org/protobuf v1.32.0 // indirect
+	google.golang.org/grpc v1.60.1
 )

@@ -12,8 +12,9 @@ const (
 )
 
 type IndexerConfig struct {
-	Type  string
-	Paths []string
+	Type   string
+	Paths  []string
+	Notify bool
 }
 
 type StoreConfig struct {
@@ -25,28 +26,20 @@ type GeneralConfig struct {
 	Logging string
 }
 
-type KnotctlConfig struct {
+type KnotidxConfig struct {
 }
 
-type KnotidxConfig struct {
+type Config struct {
 	Interval int
 	Store    StoreConfig
 	Indexer  []IndexerConfig
 }
 
-type Config struct {
-	General GeneralConfig
-	Knotidx KnotidxConfig
-	Knotctl KnotctlConfig
-}
-
 func DefaultConfig() Config {
 	conf := Config{
-		Knotidx: KnotidxConfig{
-			Interval: 5,
-			Store: StoreConfig{
-				Type: "badger",
-			},
+		Interval: 5,
+		Store: StoreConfig{
+			Type: "badger",
 		},
 	}
 	return conf
@@ -58,11 +51,11 @@ func (c Config) Load() (Config, error) {
 	if err != nil {
 		return c, err
 	}
-	meta, err := toml.Decode(string(configData), &c)
+	_, err = toml.Decode(string(configData), &c)
 	if err != nil {
 		return c, err
 	}
-	slog.Debug("Config load", "meta", meta)
+	// slog.Debug("Config load", "meta", meta)
 	slog.Debug("Config Load", "config", c)
 	return c, err
 }

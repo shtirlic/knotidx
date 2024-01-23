@@ -8,6 +8,10 @@ import (
 )
 
 func cpuprofile() func() {
+	if !programProfiler {
+		return func() {
+		}
+	}
 	f, err := os.Create("cpuprofile.prof")
 	if err != nil {
 		slog.Error("could not create CPU profile: ", err)
@@ -22,6 +26,9 @@ func cpuprofile() func() {
 }
 
 func memprofile() {
+	if !programProfiler {
+		return
+	}
 	f, err := os.Create("memprofile.prof")
 	if err != nil {
 		slog.Error("could not create memory profile: ", err)

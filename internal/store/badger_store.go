@@ -20,6 +20,11 @@ type BadgerStore struct {
 	dbType    DatabaseType
 }
 
+// Maintenance implements Store.
+func (s *BadgerStore) Maintenance() {
+	s.db.RunValueLogGC(0.7)
+}
+
 func NewBadgerStore(storePath string, inMemory bool) Store {
 	return &BadgerStore{
 		storePath: storePath,
@@ -51,9 +56,9 @@ func (s *BadgerStore) Open() (err error) {
 	slog.Debug("Opening store", "store", s)
 
 	opts := badger.DefaultOptions(s.storePath)
-	opts.NumMemtables = 3
-	opts.NumLevelZeroTables = 3
-	opts.NumLevelZeroTablesStall = 6
+	opts.NumMemtables = 2
+	opts.NumLevelZeroTables = 2
+	opts.NumLevelZeroTablesStall = 4
 	opts.NumCompactors = 2
 	opts.BlockCacheSize = 0
 	opts.Compression = options.None
@@ -63,6 +68,7 @@ func (s *BadgerStore) Open() (err error) {
 	opts.Logger = nil
 	s.db, err = badger.Open(opts.WithInMemory(s.inMemory))
 	if err != nil {
+		err = errors.Join(ErrOpenStore, err)
 		slog.Debug("error while opening store", "store", s, "error", err)
 	}
 	return
@@ -93,43 +99,55 @@ func (s *BadgerStore) Reset() (err error) {
 	return
 }
 
-func (s *BadgerStore) Find(i ItemInfo) *ItemInfo {
+func (s *BadgerStore) Delete(key string) (err error) {
 	s.Open()
-	var found bool = false
+	txn := s.db.NewTransaction(true)
+	defer txn.Discard()
+
+	err = txn.Delete([]byte(key))
+	if err != nil {
+		return
+	}
+
+	if err = txn.Commit(); err != nil {
+		return
+	}
+
+	slog.Debug("Store Delete", "key", key)
+	return nil
+}
+
+func (s *BadgerStore) Find(key string) (item *ItemInfo) {
+	s.Open()
 	s.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		prefix := []byte(i.KeyName())
+		prefix := []byte(key)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
-			item := it.Item()
-			if string(item.Key()) == i.KeyName() {
-				found = true
+			ib := it.Item()
+			if string(ib.Key()) == key {
+				item = Item(ib)
 				break
 			}
 		}
 		return nil
 	})
-
-	if found {
-		return &i
-	}
-	return nil
+	return
 }
 
-func (s *BadgerStore) GetAllKeys() []string {
-	var keys []string
+func (s *BadgerStore) Keys(prefix string) (keys []string) {
 	s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
 		defer it.Close()
-		for it.Rewind(); it.Valid(); it.Next() {
+		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
 			item := it.Item()
 			keys = append(keys, string(item.Key()))
 		}
 		return nil
 	})
-	return keys
+	return
 }
 
 func (s *BadgerStore) Add(updates map[string]ItemInfo) (err error) {
@@ -147,7 +165,7 @@ func (s *BadgerStore) Add(updates map[string]ItemInfo) (err error) {
 	return
 }
 
-func (s *BadgerStore) GetAll() (items []*ItemInfo, err error) {
+func (s *BadgerStore) Items() (items []*ItemInfo, err error) {
 	s.Open()
 	err = s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions

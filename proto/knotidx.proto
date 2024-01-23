@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+option go_package = "internal/pb";
+
+service knotidx {
+  rpc GetKeys(SearchRequest) returns (SearchResponse) {}
+  rpc Reload(EmptyRequest) returns (EmptyResponse) {}
+  rpc Shutdown(EmptyRequest) returns (EmptyResponse) {}
+}
+
+message EmptyRequest {}
+message EmptyResponse {}
+
+message SearchRequest { string query = 1; }
+
+message SearchItemResponse { string key = 1; }
+
+message SearchResponse {
+  repeated SearchItemResponse results = 1;
+  int32 count = 2;
+}

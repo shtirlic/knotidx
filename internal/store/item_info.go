@@ -23,6 +23,11 @@ type ItemInfo struct {
 	Hash     string
 }
 
+func NewItemInfo(name string, path string, modTime time.Time, size int64, t ItemType) (i ItemInfo) {
+	i = ItemInfo{Name: name, Path: path, ModTime: modTime, Size: size, Type: t}
+	return
+}
+
 func (o *ItemInfo) XXhash() string {
 	return strconv.FormatUint(xxhash.Sum64String(o.String()), 16)
 }

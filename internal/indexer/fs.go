@@ -2,13 +2,14 @@ package indexer
 
 import (
 	"fmt"
-	"log"
 	"log/slog"
 	"mime"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/shtirlic/knotidx/internal/store"
 )
 
@@ -25,186 +26,75 @@ type FileSystemIndexer struct {
 	ExcludeFileFilters []string
 	idxType            IndexerType
 	Store              store.Store
+	watcher            *fsnotify.Watcher
 }
 
-func (indexer *FileSystemIndexer) NewItemInfo() store.ItemInfo {
-	return store.ItemInfo{}
-}
-func (indexer *FileSystemIndexer) ModifiedIndex(s store.Store) {
-	// TODO implement me
-	panic("implement me")
+func (idx *FileSystemIndexer) Watch(quit chan bool) {
+
+	if idx.watcher == nil {
+		return
+	}
+
+	defer idx.watcher.Close()
+
+	slog.Debug("Watcher events select", "idx RootPath", idx.RootPath)
+
+	for {
+		select {
+		case event, ok := <-idx.watcher.Events:
+			if !ok {
+				return
+			}
+			slog.Debug("Watcher", "event", event)
+
+			switch event.Op {
+			case fsnotify.Chmod, fsnotify.Write, fsnotify.Create:
+				idx.addPath(event.Name)
+			case fsnotify.Remove, fsnotify.Rename:
+				idx.removePath(event.Name)
+			}
+		case err, ok := <-idx.watcher.Errors:
+			if !ok {
+				return
+			}
+			slog.Debug("Watcher", "error", err)
+		case <-quit:
+			slog.Debug("Quit watcher", "idx RootPath", idx.RootPath)
+			return
+		}
+	}
 }
 
-func (indexer *FileSystemIndexer) Type() IndexerType {
-	return indexer.idxType
+func (idx *FileSystemIndexer) Type() IndexerType {
+	return idx.idxType
 }
 
 func (indexer *FileSystemIndexer) Config() *Config {
 	return &Config{Name: "fs indexer", Params: map[string]string{}}
 }
 
-func DefaultExcludeDirFilters() []string {
-	return []string{
-		"po",
+func NewFileSystemIndexer(store store.Store, rootPath string, notify bool, excludeDirFilters []string, excludeFileFilters []string) Indexer {
 
-		// VCS
-		"CVS",
-		".svn",
-		".git",
-		"_darcs",
-		".bzr",
-		".hg",
-
-		// development
-		"CMakeFiles",
-		"CMakeTmp",
-		"CMakeTmpQmake",
-		".moc",
-		".obj",
-		".pch",
-		".uic",
-		".npm",
-		".yarn",
-		".yarn-cache",
-		"__pycache__",
-		"node_modules",
-		"node_packages",
-		"nbproject",
-		".terraform",
-		".venv",
-		"venv",
-		".rbenv",
-		".bundle",
-		".conda",
-		".cargo",
-		".vscode",
-
-		// misc
-		"core-dumps",
-		"lost+found",
-		"drive_c", // wine giant dirs
-		".wine",
-		".mozilla",
-		".thunderbird",
-
-		// cache dirs
-		".cache",
-		"CachedData",
-		"CacheStorage",
-		"Cache_Data",
-		"Code Cache",
-		"ScriptCache",
-
-		// do not use in production
-		".local",
-		".config",
+	if len(excludeDirFilters) == 0 {
+		excludeDirFilters = DefaultExcludeDirFilters()
 	}
-}
-func DefaultExcludeFileFilters() []string {
-	return []string{
-		"*~",
-		"*.part",
-
-		// temporary build files
-		"*.o",
-		"*.la",
-		"*.lo",
-		"*.loT",
-		"*.moc",
-		"moc_*.cpp",
-		"qrc_*.cpp",
-		"ui_*.h",
-		"cmake_install.cmake",
-		"CMakeCache.txt",
-		"CTestTestfile.cmake",
-		"libtool",
-		"config.status",
-		"confdefs.h",
-		"autom4te",
-		"conftest",
-		"confstat",
-		"Makefile.am",
-		"*.gcode", // CNC machine/3D printer toolpath files
-		".ninja_deps",
-		".ninja_log",
-		"build.ninja",
-
-		// misc
-		"*.csproj",
-		"*.m4",
-		"*.rej",
-		"*.gmo",
-		"*.pc",
-		"*.omf",
-		"*.aux",
-		"*.tmp",
-		"*.po",
-		"*.vm*",
-		"*.nvram",
-		"*.rcore",
-		"*.swp",
-		"*.swap",
-		"lzo",
-		"litmain.sh",
-		"*.orig",
-		".histfile.*",
-		".xsession-errors*",
-		"*.map",
-		"*.so",
-		"*.a",
-		"*.db",
-		"*.qrc",
-		"*.ini",
-		"*.init",
-		"*.img",      // typical extension for raw disk images
-		"*.vdi",      // Virtualbox disk images
-		"*.vbox*",    // Virtualbox VM files
-		"vbox.log",   // Virtualbox log files
-		"*.qcow2",    // QEMU QCOW2 disk images
-		"*.vmdk",     // VMware disk images
-		"*.vhd",      // Hyper-V disk images
-		"*.vhdx",     // Hyper-V disk images
-		"*.sql",      // SQL database dumps
-		"*.sql.gz",   // Compressed SQL database dumps
-		"*.ytdl",     // youtube-dl temp files
-		"*.tfstate*", // Terraform state files
-
-		// Bytecode files
-		"*.class", // Java
-		"*.pyc",   // Python
-		"*.pyo",   // More Python
-		"*.elc",   // Emacs Lisp
-		"*.qmlc",  // QML
-		"*.jsc",   // Javascript
-
-		// files known in bioinformatics containing huge amount of unindexable data
-		"*.fastq",
-		"*.fq",
-		"*.gb",
-		"*.fasta",
-		"*.fna",
-		"*.gbff",
-		"*.faa",
-		"*.fna",
-	}
-}
-
-func NewFileSystemIndexer(store store.Store, rootPath string, excludeDirFilter []string, excludeFileFilter []string) Indexer {
-
-	if len(excludeDirFilter) == 0 {
-		excludeDirFilter = DefaultExcludeDirFilters()
-	}
-	if len(excludeFileFilter) == 0 {
-		excludeFileFilter = DefaultExcludeFileFilters()
+	if len(excludeFileFilters) == 0 {
+		excludeFileFilters = DefaultExcludeFileFilters()
 	}
 
-	return &FileSystemIndexer{
+	fsi := &FileSystemIndexer{
 		RootPath:           filepath.Clean(rootPath),
-		ExcludeDirFilters:  excludeDirFilter,
-		ExcludeFileFilters: excludeFileFilter,
+		ExcludeDirFilters:  excludeDirFilters,
+		ExcludeFileFilters: excludeFileFilters,
 		idxType:            FsIndexerType,
 		Store:              store,
 	}
+	// TODO: handle error
+	// Enbale fs notify watcher
+	if notify {
+		fsi.watcher, _ = fsnotify.NewWatcher()
+	}
+	return fsi
 }
 
 func ItemType(isDir bool) store.ItemType {
@@ -214,36 +104,107 @@ func ItemType(isDir bool) store.ItemType {
 	return FileItemType
 }
 
-func (idx *FileSystemIndexer) NewIndex() (err error) {
+func (idx *FileSystemIndexer) CleanIndex(prefix string) error {
 
-	path, err := os.Stat(idx.RootPath)
+	prefix = string(idx.idxType) + "_" + prefix
+
+	for _, key := range idx.Store.Keys(prefix) {
+		item := strings.SplitN(key, "_", 3)
+		path := item[2]
+		fi, err := os.Lstat(path)
+		if err != nil {
+			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+			if err = idx.Store.Delete(key); err != nil {
+				return err
+			} else {
+				continue
+			}
+		}
+		if fi.IsDir() && store.ItemType(item[1]) != DirItemType {
+			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+			if err = idx.Store.Delete(key); err != nil {
+				return err
+			}
+		}
+		if !fi.IsDir() && store.ItemType(item[1]) != FileItemType {
+			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+			if err = idx.Store.Delete(key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (idx *FileSystemIndexer) UpdateIndex() (err error) {
+	err = idx.CleanIndex("")
 	if err != nil {
-		slog.Error("Can't get fileinfo for root path:", "error", err, "path", path)
 		return
 	}
 
-	rootFileInfo := store.ItemInfo{
-		Name: path.Name(),
-		Path: idx.RootPath,
-		Type: ItemType(path.IsDir()),
-	}
-	if idx.Store.Find(rootFileInfo) != nil {
-		slog.Info("already in index, skipping", "key", rootFileInfo.KeyName())
+	err = idx.addPath(idx.RootPath)
+	if err != nil {
 		return
-	} else {
-		slog.Info("not found in index, adding", "key", rootFileInfo.KeyName())
 	}
+
+	idx.Store.Maintenance()
+	return
+}
+
+func (idx *FileSystemIndexer) removePath(path string) {
+	path = filepath.Clean(path)
+	idx.CleanIndex("dir_" + path)
+	idx.CleanIndex("file_" + path)
+}
+
+func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
+
+	if newPath == "" {
+		newPath = idx.RootPath
+	}
+	newPath = filepath.Clean(newPath)
+
+	// Return if no access to path
+	path, err := os.Stat(newPath)
+	if err != nil {
+		slog.Error("Can't get fileinfo for path:", "error", err, "path", path)
+		return
+	}
+
+	slog.Debug("fs indexer addPath", "path", path.Name())
+
+	// // Create temp ItemInfo for searching
+	// rootFileInfo := store.ItemInfo{
+	// 	Name: path.Name(),
+	// 	Path: idx.RootPath,
+	// 	Type: ItemType(path.IsDir()),
+	// }
+
+	// // Search for root path in index
+	// if idx.Store.Find(rootFileInfo) != nil {
+	// 	slog.Info("already in index, skipping", "key", rootFileInfo.KeyName())
+	// 	return
+	// } else {
+	// 	slog.Info("not found in index, adding", "key", rootFileInfo.KeyName())
+	// }
 
 	idxSize := 0
 	idxDirSize := 0
 	idxFileSize := 0
-	itemList := make(map[string]store.ItemInfo)
-	err = filepath.Walk(idx.RootPath, func(path string, info os.FileInfo, err error) error {
 
-		// TODO: Add to failed item list
-		// Skip access denied etc.
+	// Map for storing file/dir entries
+	itemList := make(map[string]store.ItemInfo)
+
+	// List for failed file/dir items
+	var failedItems []string
+
+	// Walking from the root path recursevly
+	err = filepath.Walk(newPath, func(path string, info os.FileInfo, err error) error {
+
+		// Skip access denied etc and add to failed list
 		if err != nil {
-			log.Println("Inside Walk:", err, path)
+			slog.Debug("Inside Walk", "err", err, "path", path)
+			failedItems = append(failedItems, path)
 			return filepath.SkipDir
 		}
 
@@ -253,36 +214,40 @@ func (idx *FileSystemIndexer) NewIndex() (err error) {
 		}
 
 		// TODO: Try to use Match/Glob for file masks
+		// NOTICE: file masks are not working now
 		// Skip files via exclude file filters
 		if !info.IsDir() && slices.Contains(idx.ExcludeFileFilters, info.Name()) {
 			return nil
 		}
 
-		objInfo := store.ItemInfo{
-			Hash:    "",
-			Name:    info.Name(),
-			Path:    path,
-			ModTime: info.ModTime(),
-			Size:    info.Size(),
-			Type:    ItemType(info.IsDir()),
-		}
+		// Create ItemInfo for index addtion
+		itemInfo := store.NewItemInfo(
+			info.Name(),
+			path,
+			info.ModTime(),
+			info.Size(),
+			ItemType(info.IsDir()))
 
 		// Get the mimetype for file by extension
-		if objInfo.Type == FileItemType {
+		if itemInfo.Type == FileItemType {
 			idxFileSize++
-			objInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
+			itemInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
 		} else {
+			if idx.watcher != nil {
+				idx.watcher.Add(path)
+			}
 			idxDirSize++
 		}
 		// Calc hash
-		objInfo.Hash = objInfo.XXhash()
+		itemInfo.Hash = itemInfo.XXhash()
 
+		key := fmt.Sprintf("%s_%s", idx.idxType, itemInfo.KeyName())
 		// Add to items list
-		itemList[objInfo.KeyName()] = objInfo
+		itemList[key] = itemInfo
 		idxSize++
 
-		// Add items to store in batch per 100 items
-		if len(itemList) > 100 {
+		// Add items to store in batches
+		if len(itemList) > store.BatchCount {
 			err = idx.Store.Add(itemList)
 			if err != nil {
 				slog.Error("can't add items to store")
@@ -293,7 +258,7 @@ func (idx *FileSystemIndexer) NewIndex() (err error) {
 		return err
 	})
 	if err != nil {
-		log.Println("After Walk:", err)
+		slog.Debug("After Walk", "err", err)
 		return
 	}
 
@@ -306,7 +271,7 @@ func (idx *FileSystemIndexer) NewIndex() (err error) {
 		}
 	}
 
-	addInfo := fmt.Sprintf("All: %d, Files: %d, Dirs: %d \n", idxSize, idxFileSize, idxDirSize)
+	addInfo := fmt.Sprintf("All: %d, Files: %d, Dirs: %d, Failed: %d, rootPath: %s", idxSize, idxFileSize, idxDirSize, len(failedItems), idx.RootPath)
 	slog.Info(addInfo)
 
 	slog.Debug(idx.Store.Info())
