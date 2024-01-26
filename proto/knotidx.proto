@@ -6,6 +6,7 @@ service knotidx {
   rpc GetKeys(SearchRequest) returns (SearchResponse) {}
   rpc Reload(EmptyRequest) returns (EmptyResponse) {}
   rpc Shutdown(EmptyRequest) returns (EmptyResponse) {}
+  rpc ResetScheduler(EmptyRequest) returns (EmptyResponse) {}
 }
 
 message EmptyRequest {}

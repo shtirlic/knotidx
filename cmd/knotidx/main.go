@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	programName string = "knotidx"
+// programName string = "knotidx"
 )
 
 var (
@@ -24,6 +24,9 @@ var (
 	programLevel         = new(slog.LevelVar) // Info by default
 	programProfiler bool = false
 
+	gConf  config.Config
+	gStore store.Store
+
 	daemonCmd      = flag.Bool("daemon", false, "run knotidx daemon")
 	showConfigCmd  = flag.Bool("show-config", false, "show knotidx config")
 	checkConfigCmd = flag.Bool("check-config", false, "check knotidx config for errors")
@@ -31,6 +34,7 @@ var (
 )
 
 func main() {
+	flag.Parse()
 
 	// flag.CommandLine.""
 	// flag.CommandLine.Set("alsologtostderr", "false")
@@ -44,39 +48,39 @@ func main() {
 	// pflag.CommandLine.MarkHidden("stderrthreshold")
 	// pflag.CommandLine.MarkHidden("vmodule")
 
-	flag.Parse()
 	// Set slog logger
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: programLevel,
 	})).With(
-		slog.String("program", programName),
-		slog.Int("pid", os.Getpid()),
+	// slog.String("program", programName),
+	// slog.Int("pid", os.Getpid()),
 	))
+
 	programLevel.Set(slog.LevelDebug)
 
 	slog.Info("build info", "version", version, "commit", commit, "date", date)
-	if *daemonCmd {
-		daemon()
-		return
-	}
+
+	defer shutDown()
+
 	if *showConfigCmd {
 		showConfig()
-		return
 	}
 
 	if *checkConfigCmd {
 		checkConfig()
+	}
+
+	// Load configs and open store
+	if gConf, gStore, programErr = startUp(); programErr != nil {
 		return
 	}
 
+	if *daemonCmd {
+		daemonStart()
+	}
+
 	if *searchCmd {
-		// Load configs and open store
-		if gConf, gStore, programErr = startUp(); programErr != nil {
-			return
-		}
-		defer shutDown()
-		Search()
-		return
+		programErr = searchClient()
 	}
 }
 
@@ -84,28 +88,28 @@ func main() {
 func shutDown() {
 	slog.Info("Stoopping knotidx")
 
+	// If cmd was run in daemon mode
 	if *daemonCmd {
-		if ticker != nil {
-			slog.Debug("Stoopping ticker")
-			ticker.Stop()
-		}
-		slog.Info("Waiting for all indexers to finish")
-		// Close watchers channel
-		if quitWtCh != nil {
-			close(quitWtCh)
-		}
-		wg.Wait()
+		daemonShutDown()
 	}
 
 	// Close the store
-	gStore.Close()
+	if gStore != nil {
+		// TODO: wrap err
+		gStore.Close()
+	}
 
 	if programErr != nil && programExitCode != 0 {
 		slog.Error("exit", "error", programErr)
 	}
 	memprofile()
-	slog.Info("knotidx stopped", "exit", programExitCode)
-	os.Exit(programExitCode)
+
+	if r := recover(); r != nil {
+		panic(r)
+	} else {
+		slog.Info("knotidx stopped", "exit", programExitCode)
+		os.Exit(programExitCode)
+	}
 }
 
 // Startup seq reloading configs and create/open store
@@ -115,7 +119,7 @@ func startUp() (conf config.Config, s store.Store, err error) {
 		return
 	}
 	// Open the store
-	if s, err = newGlobalStore(conf.Store); err != nil {
+	if s, err = newStore(conf.Store); err != nil {
 		return
 	}
 	return
@@ -141,7 +145,7 @@ func showConfig() {
 
 // (Re)Load default config and file config
 func reloadConfig() (conf config.Config, err error) {
-	if conf, err = config.DefaultConfig().Load(); err != nil {
+	if conf, err = config.DefaultConfig().Load(""); err != nil {
 		slog.Error("Can't read config from toml files", "error", err)
 		return
 	}

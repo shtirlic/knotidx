@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/shtirlic/knotidx/internal/config"
 	"github.com/shtirlic/knotidx/internal/store"
 )
 
@@ -24,9 +25,9 @@ type FileSystemIndexer struct {
 	RootPath           string
 	ExcludeDirFilters  []string
 	ExcludeFileFilters []string
-	idxType            IndexerType
 	Store              store.Store
 	watcher            *fsnotify.Watcher
+	config             config.IndexerConfig
 }
 
 func (idx *FileSystemIndexer) Watch(quit chan bool) {
@@ -66,14 +67,17 @@ func (idx *FileSystemIndexer) Watch(quit chan bool) {
 }
 
 func (idx *FileSystemIndexer) Type() IndexerType {
-	return idx.idxType
+	return FsIndexerType
 }
 
-func (indexer *FileSystemIndexer) Config() *Config {
-	return &Config{Name: "fs indexer", Params: map[string]string{}}
+func (idx *FileSystemIndexer) Config() config.IndexerConfig {
+	return idx.config
 }
 
-func NewFileSystemIndexer(store store.Store, rootPath string, notify bool, excludeDirFilters []string, excludeFileFilters []string) Indexer {
+func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerConfig) Indexer {
+
+	excludeDirFilters := c.ExcludeDirFilters
+	excludeFileFilters := c.ExcludeFileFilters
 
 	if len(excludeDirFilters) == 0 {
 		excludeDirFilters = DefaultExcludeDirFilters()
@@ -86,12 +90,12 @@ func NewFileSystemIndexer(store store.Store, rootPath string, notify bool, exclu
 		RootPath:           filepath.Clean(rootPath),
 		ExcludeDirFilters:  excludeDirFilters,
 		ExcludeFileFilters: excludeFileFilters,
-		idxType:            FsIndexerType,
 		Store:              store,
+		config:             c,
 	}
 	// TODO: handle error
 	// Enbale fs notify watcher
-	if notify {
+	if c.Notify {
 		fsi.watcher, _ = fsnotify.NewWatcher()
 	}
 	return fsi
@@ -106,9 +110,9 @@ func ItemType(isDir bool) store.ItemType {
 
 func (idx *FileSystemIndexer) CleanIndex(prefix string) error {
 
-	prefix = string(idx.idxType) + "_" + prefix
+	prefix = string(idx.Type()) + "_" + prefix
 
-	for _, key := range idx.Store.Keys(prefix) {
+	for _, key := range idx.Store.Keys(prefix, "", 0) {
 		item := strings.SplitN(key, "_", 3)
 		path := item[2]
 		fi, err := os.Lstat(path)
@@ -241,7 +245,7 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 		// Calc hash
 		itemInfo.Hash = itemInfo.XXhash()
 
-		key := fmt.Sprintf("%s_%s", idx.idxType, itemInfo.KeyName())
+		key := fmt.Sprintf("%s_%s", idx.Type(), itemInfo.KeyName())
 		// Add to items list
 		itemList[key] = itemInfo
 		idxSize++

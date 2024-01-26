@@ -7,14 +7,26 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+type GrpcServerType string
+
 const (
-	configFile = "configs/knotidx.toml"
+	defaultConfigFile     = "configs/knotidx.toml"
+	defaultGrpcPort       = 5319
+	defaultGrpcHost       = "localhost"
+	defaultGrpcSocketPath = "knotidx.sock"
+	defaultInterval       = 5 // seconds
+	defaultStoreType      = "badger"
+
+	GrpcServerTcpType  GrpcServerType = "tcp"
+	GrpcServerUnixType GrpcServerType = "unix"
 )
 
 type IndexerConfig struct {
-	Type   string
-	Paths  []string
-	Notify bool
+	Type               string
+	Paths              []string
+	Notify             bool
+	ExcludeDirFilters  []string
+	ExcludeFileFilters []string
 }
 
 type StoreConfig struct {
@@ -22,32 +34,49 @@ type StoreConfig struct {
 	Path string
 }
 
-type GeneralConfig struct {
-	Logging string
-}
-
-type KnotidxConfig struct {
+type GrpcConfig struct {
+	Server bool
+	Port   int
+	Type   GrpcServerType
+	Path   string
+	Host   string
 }
 
 type Config struct {
 	Interval int
+	Grpc     GrpcConfig
 	Store    StoreConfig
 	Indexer  []IndexerConfig
 }
 
 func DefaultConfig() Config {
+	// TODO: make nice slash handling( clear path)
+	defaultBaseSocketPath := os.Getenv("XDG_RUNTIME_DIR")
+	if defaultBaseSocketPath != "" {
+		defaultBaseSocketPath = defaultBaseSocketPath + "/"
+	}
 	conf := Config{
-		Interval: 5,
+		Interval: defaultInterval,
 		Store: StoreConfig{
-			Type: "badger",
+			Type: defaultStoreType,
+		},
+		Grpc: GrpcConfig{
+			Server: true,
+			Type:   GrpcServerUnixType,
+			Port:   defaultGrpcPort,
+			Host:   defaultGrpcHost,
+			Path:   defaultBaseSocketPath + defaultGrpcSocketPath,
 		},
 	}
 	return conf
 }
 
-func (c Config) Load() (Config, error) {
-	slog.Info("Config Load", "path", configFile)
-	configData, err := os.ReadFile(configFile)
+func (c Config) Load(configPath string) (Config, error) {
+	if configPath == "" {
+		configPath = defaultConfigFile
+	}
+	slog.Info("Config Load", "path", configPath)
+	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		return c, err
 	}

@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"runtime"
 	"runtime/debug"
 	"sync"
 	"syscall"
@@ -25,17 +24,38 @@ const (
 
 var (
 	ticker *time.Ticker
-	gConf  config.Config
-	gStore store.Store
-	wg     sync.WaitGroup
 
-	quitCh   chan bool
-	quitWtCh chan bool
+	wg sync.WaitGroup
+
+	quitCh   chan bool = make(chan bool)
+	quitWtCh chan bool = make(chan bool)
 
 	lastTriggerTime time.Time = time.UnixMicro(0)
 )
 
-func daemon() {
+// Stop the background ticker
+func stopTicker() {
+	if ticker != nil {
+		slog.Debug("Stopping background ticker")
+		ticker.Stop()
+	}
+}
+
+// Close watchers channel and wait for indexers jobs
+func waitJobs() {
+	slog.Debug("Closing the watchers quit channel")
+	close(quitWtCh)
+	slog.Debug("Waiting for all indexers jobs to finish")
+	wg.Wait()
+}
+
+func daemonShutDown() {
+	stopGrpcServer()
+	stopTicker()
+	waitJobs()
+}
+
+func daemonStart() {
 
 	slog.Info("Starting knotidx daemon")
 
@@ -43,25 +63,14 @@ func daemon() {
 	debug.SetMemoryLimit(384 << 20)
 	defer cpuprofile()()
 
-	// Handle shutdown
-	defer shutDown()
-
 	// Set channel notify for singals
 	sigCh := watchSignals()
-
-	// Load configs and open store
-	if gConf, gStore, programErr = startUp(); programErr != nil {
-		return
-	}
 
 	// Start background ticker
 	ticker = newTicker(time.Duration(gConf.Interval))
 
-	// Quit channel
-	quitCh = make(chan bool)
-
 	// start grpc server
-	go startGrpcServer()
+	go startGrpcServer(gConf.Grpc)
 
 	// Start the main daemon loop
 	// Wait for background events and OS signals
@@ -89,7 +98,7 @@ func newTicker(t time.Duration) *time.Ticker {
 }
 
 func tick() {
-	slog.Debug("Got work?")
+	slog.Debug("Got work?", "interval", gConf.Interval)
 	scheduleWork()
 }
 
@@ -97,60 +106,72 @@ func scheduleWork() {
 	idleTime := idle.Idle()
 
 	slog.Debug("Load AVG", "load", idle.SysinfoAvg())
-	slog.Info("Idle time", "idle", idleTime)
+	slog.Debug("Idle time", "idle", idleTime)
 	slog.Debug("Last work was at:", "date", lastTriggerTime)
 
 	if (idleTime >= idleThreshold && time.Since(lastTriggerTime) >= triggerInterval) || time.UnixMicro(0) == lastTriggerTime {
+
+		// wait for unfinished jobs before schedule a new ones
+		waitJobs()
 		lastTriggerTime = time.Now()
-		slog.Info("Doing work 1 time per hour")
-		addIndexers(gConf.Indexer, gStore)
+		slog.Info("Start addIndexers job", "time", lastTriggerTime)
+		quitWtCh = make(chan bool)
+		addIndexers(gConf.Indexer, gStore, quitWtCh)
 	}
 
 }
 
+// Watcher goroutine
 func addWatcher(idx indexer.Indexer, quitWtCh chan bool) {
 	defer wg.Done()
 
 	idx.Watch(quitWtCh)
 }
 
+// Indexer goroutine
 func addToIndex(idx indexer.Indexer) {
 	defer wg.Done()
 
-	slog.Info("Starting updateIndex", "type", idx.Type())
+	slog.Info("Starting updateIndex", "config", idx.Config())
 	if err := idx.UpdateIndex(); err != nil {
 		slog.Error("new index failed", "error", err, "indexer", idx)
 	}
 
 }
 
-func addIndexers(idxConfigs []config.IndexerConfig, s store.Store) {
-	if quitWtCh != nil {
-		close(quitWtCh)
-	}
-	quitWtCh = make(chan bool)
+func addIndexers(idxConfigs []config.IndexerConfig, s store.Store, quitWtCh chan bool) {
+
+	slog.Debug("Indexers", "idx count", len(idxConfigs))
 
 	for _, idxConfig := range idxConfigs {
 		for _, idx := range indexer.NewIndexers(idxConfig, s) {
 
-			// Fire goroutine watcher
-			wg.Add(1)
-			go addWatcher(idx, quitWtCh)
-
 			// Fire goroutine index
 			wg.Add(1)
 			go addToIndex(idx)
+
+			// Fire goroutine watcher
+			wg.Add(1)
+			go addWatcher(idx, quitWtCh)
 		}
 	}
 }
 
 // Create and Open the store
-func newGlobalStore(conf config.StoreConfig) (s store.Store, err error) {
+func newStore(conf config.StoreConfig) (s store.Store, err error) {
 	if s, err = store.NewStore(conf); err != nil {
 		slog.Error("Can't create/open the store", "store", s, "error", err)
 		return
 	}
 	return
+}
+
+func resetScheduler(interval int) {
+	slog.Info("Scheduler reset", "interval", interval)
+	// Reset ticker to the new config value
+	ticker.Reset(time.Second * time.Duration(interval))
+	// Reset last background run time
+	lastTriggerTime = time.UnixMicro(0)
 }
 
 // Calculate the exit code
@@ -164,31 +185,24 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	handled = false
 	exit = getExitCode(sig)
 
-	// stop the background ticker
-	slog.Debug("Stoopping ticker")
-	ticker.Stop()
-
-	// Reset last background run time
-	lastTriggerTime = time.UnixMicro(0)
-
-	// wait for indexer tasks to finish
-	slog.Info("Waiting for all indexers to finish")
-	if quitWtCh != nil {
-		close(quitWtCh)
-		quitWtCh = make(chan bool)
-	}
-	wg.Wait()
+	daemonShutDown()
 
 	if err = gStore.Close(); err != nil {
 		return
 	}
-	runtime.GC()
-	// memprofile()
+
+	memprofile()
 
 	if gConf, gStore, err = startUp(); err != nil {
 		return
 	}
-	ticker.Reset(time.Second * time.Duration(gConf.Interval))
+
+	quitWtCh = make(chan bool)
+
+	resetScheduler(gConf.Interval)
+
+	// start grpc server
+	go startGrpcServer(gConf.Grpc)
 
 	handled = true
 	exit = 0

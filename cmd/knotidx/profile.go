@@ -9,8 +9,7 @@ import (
 
 func cpuprofile() func() {
 	if !programProfiler {
-		return func() {
-		}
+		return func() {}
 	}
 	f, err := os.Create("cpuprofile.prof")
 	if err != nil {
@@ -26,6 +25,7 @@ func cpuprofile() func() {
 }
 
 func memprofile() {
+	runtime.GC()
 	if !programProfiler {
 		return
 	}
@@ -34,7 +34,6 @@ func memprofile() {
 		slog.Error("could not create memory profile: ", err)
 	}
 	defer f.Close()
-	runtime.GC()
 	if err := pprof.WriteHeapProfile(f); err != nil {
 		slog.Error("could not write memory profile: ", err)
 	}

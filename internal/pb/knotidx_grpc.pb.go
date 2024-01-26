@@ -19,9 +19,10 @@ import (
 const _ = grpc.SupportPackageIsVersion7
 
 const (
-	Knotidx_GetKeys_FullMethodName  = "/knotidx/GetKeys"
-	Knotidx_Reload_FullMethodName   = "/knotidx/Reload"
-	Knotidx_Shutdown_FullMethodName = "/knotidx/Shutdown"
+	Knotidx_GetKeys_FullMethodName        = "/knotidx/GetKeys"
+	Knotidx_Reload_FullMethodName         = "/knotidx/Reload"
+	Knotidx_Shutdown_FullMethodName       = "/knotidx/Shutdown"
+	Knotidx_ResetScheduler_FullMethodName = "/knotidx/ResetScheduler"
 )
 
 // KnotidxClient is the client API for Knotidx service.
@@ -31,6 +32,7 @@ type KnotidxClient interface {
 	GetKeys(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
 	Reload(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*EmptyResponse, error)
 	Shutdown(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*EmptyResponse, error)
+	ResetScheduler(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*EmptyResponse, error)
 }
 
 type knotidxClient struct {
@@ -68,6 +70,15 @@ func (c *knotidxClient) Shutdown(ctx context.Context, in *EmptyRequest, opts ...
 	return out, nil
 }
 
+func (c *knotidxClient) ResetScheduler(ctx context.Context, in *EmptyRequest, opts ...grpc.CallOption) (*EmptyResponse, error) {
+	out := new(EmptyResponse)
+	err := c.cc.Invoke(ctx, Knotidx_ResetScheduler_FullMethodName, in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // KnotidxServer is the server API for Knotidx service.
 // All implementations must embed UnimplementedKnotidxServer
 // for forward compatibility
@@ -75,6 +86,7 @@ type KnotidxServer interface {
 	GetKeys(context.Context, *SearchRequest) (*SearchResponse, error)
 	Reload(context.Context, *EmptyRequest) (*EmptyResponse, error)
 	Shutdown(context.Context, *EmptyRequest) (*EmptyResponse, error)
+	ResetScheduler(context.Context, *EmptyRequest) (*EmptyResponse, error)
 	mustEmbedUnimplementedKnotidxServer()
 }
 
@@ -90,6 +102,9 @@ func (UnimplementedKnotidxServer) Reload(context.Context, *EmptyRequest) (*Empty
 }
 func (UnimplementedKnotidxServer) Shutdown(context.Context, *EmptyRequest) (*EmptyResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Shutdown not implemented")
+}
+func (UnimplementedKnotidxServer) ResetScheduler(context.Context, *EmptyRequest) (*EmptyResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ResetScheduler not implemented")
 }
 func (UnimplementedKnotidxServer) mustEmbedUnimplementedKnotidxServer() {}
 
@@ -158,6 +173,24 @@ func _Knotidx_Shutdown_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Knotidx_ResetScheduler_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EmptyRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnotidxServer).ResetScheduler(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Knotidx_ResetScheduler_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnotidxServer).ResetScheduler(ctx, req.(*EmptyRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Knotidx_ServiceDesc is the grpc.ServiceDesc for Knotidx service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -176,6 +209,10 @@ var Knotidx_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Shutdown",
 			Handler:    _Knotidx_Shutdown_Handler,
+		},
+		{
+			MethodName: "ResetScheduler",
+			Handler:    _Knotidx_ResetScheduler_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

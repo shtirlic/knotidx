@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
+	"strings"
 
 	"github.com/dgraph-io/badger/v4"
 	"github.com/dgraph-io/badger/v4/options"
@@ -17,10 +19,8 @@ type BadgerStore struct {
 	storePath string
 	db        *badger.DB
 	inMemory  bool
-	dbType    DatabaseType
 }
 
-// Maintenance implements Store.
 func (s *BadgerStore) Maintenance() {
 	s.db.RunValueLogGC(0.7)
 }
@@ -29,7 +29,6 @@ func NewBadgerStore(storePath string, inMemory bool) Store {
 	return &BadgerStore{
 		storePath: storePath,
 		inMemory:  inMemory,
-		dbType:    BadgerDatabaseType,
 	}
 }
 
@@ -42,7 +41,7 @@ func NewInMemoryBadgerStore() Store {
 }
 
 func (s *BadgerStore) Type() DatabaseType {
-	return s.dbType
+	return BadgerDatabaseType
 }
 
 func (s *BadgerStore) Info() string {
@@ -135,15 +134,21 @@ func (s *BadgerStore) Find(key string) (item *ItemInfo) {
 	return
 }
 
-func (s *BadgerStore) Keys(prefix string) (keys []string) {
+func (s *BadgerStore) Keys(prefix string, pattern string, limit int) (keys []string) {
+	if limit == 0 {
+		limit = math.MaxInt
+	}
 	s.db.View(func(txn *badger.Txn) error {
 		opts := badger.DefaultIteratorOptions
 		opts.PrefetchValues = false
 		it := txn.NewIterator(opts)
 		defer it.Close()
-		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)); it.Next() {
+		for it.Seek([]byte(prefix)); it.ValidForPrefix([]byte(prefix)) && limit > 0; it.Next() {
 			item := it.Item()
-			keys = append(keys, string(item.Key()))
+			if strings.Contains(string(item.Key()), pattern) {
+				keys = append(keys, string(item.Key()))
+				limit--
+			}
 		}
 		return nil
 	})

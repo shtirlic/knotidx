@@ -21,7 +21,7 @@ type Store interface {
 	Info() string
 	Maintenance()
 	Type() DatabaseType
-	Keys(prefix string) []string
+	Keys(prefix string, pattern string, limit int) []string
 
 	Add(map[string]ItemInfo) error
 	Items() ([]*ItemInfo, error)
