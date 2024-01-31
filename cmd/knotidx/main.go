@@ -30,7 +30,7 @@ var (
 	daemonCmd      = flag.Bool("daemon", false, "run knotidx daemon")
 	showConfigCmd  = flag.Bool("show-config", false, "show knotidx config")
 	checkConfigCmd = flag.Bool("check-config", false, "check knotidx config for errors")
-	searchCmd      = flag.Bool("search", false, "interactive index search")
+	clientCmd      = flag.Bool("client", false, "interactive index search")
 )
 
 func main() {
@@ -79,8 +79,8 @@ func main() {
 		daemonStart()
 	}
 
-	if *searchCmd {
-		programErr = searchClient()
+	if *clientCmd {
+		programErr = idxClient()
 	}
 }
 
@@ -113,13 +113,13 @@ func shutDown() {
 }
 
 // Startup seq reloading configs and create/open store
-func startUp() (conf config.Config, s store.Store, err error) {
+func startUp() (c config.Config, s store.Store, err error) {
 	// Load default config and file config
-	if conf, err = reloadConfig(); err != nil {
+	if c, err = reloadConfig(); err != nil {
 		return
 	}
 	// Open the store
-	if s, err = newStore(conf.Store); err != nil {
+	if s, err = newStore(c.Store); err != nil {
 		return
 	}
 	return
@@ -144,10 +144,12 @@ func showConfig() {
 }
 
 // (Re)Load default config and file config
-func reloadConfig() (conf config.Config, err error) {
-	if conf, err = config.DefaultConfig().Load(""); err != nil {
+func reloadConfig() (config.Config, error) {
+	var c config.Config
+	var err error
+	if c, err = config.DefaultConfig().Load(""); err != nil {
 		slog.Error("Can't read config from toml files", "error", err)
-		return
+		return config.Config{}, err
 	}
-	return
+	return c, nil
 }

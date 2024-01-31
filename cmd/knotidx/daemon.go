@@ -16,24 +16,26 @@ import (
 	"github.com/shtirlic/knotidx/internal/store"
 )
 
+// Constants defining thresholds and intervals
 const (
-	idleThreshold   = 95.0 // idle percentage
-	triggerInterval = 1 * time.Hour
-	// triggerInterval = 10 * time.Second
+	idleThreshold   = 95.0          // Idle percentage threshold for triggering actions
+	triggerInterval = 1 * time.Hour // Time interval for triggering actions
+	// triggerInterval = 10 * time.Second // Alternative shorter time interval for testing
 )
 
+// Variables used for background tasks
 var (
-	ticker *time.Ticker
+	ticker *time.Ticker // Ticker for periodic actions
 
-	wg sync.WaitGroup
+	wg sync.WaitGroup // WaitGroup for coordinating goroutines
 
-	quitCh   chan bool = make(chan bool)
-	quitWtCh chan bool = make(chan bool)
+	quitCh   chan bool = make(chan bool) // Channel for quitting the main loop
+	quitWtCh chan bool = make(chan bool) // Channel for quitting the worker goroutine
 
-	lastTriggerTime time.Time = time.UnixMicro(0)
+	lastTriggerTime time.Time = time.UnixMicro(0) // Time of the last triggered action
 )
 
-// Stop the background ticker
+// stopTicker stops the background ticker
 func stopTicker() {
 	if ticker != nil {
 		slog.Debug("Stopping background ticker")
@@ -41,46 +43,47 @@ func stopTicker() {
 	}
 }
 
-// Close watchers channel and wait for indexers jobs
+// waitJobs closes the watchers quit channel and waits for indexers jobs to finish.
 func waitJobs() {
 	slog.Debug("Closing the watchers quit channel")
-	close(quitWtCh)
+	close(quitWtCh) // Close the channel to signal watcher goroutines to quit
 	slog.Debug("Waiting for all indexers jobs to finish")
-	wg.Wait()
+	wg.Wait() // Wait for all indexer jobs to finish
 }
 
+// daemonShutDown performs shutdown actions for the daemon.
 func daemonShutDown() {
-	stopGrpcServer()
-	stopTicker()
-	waitJobs()
+	stopGRPCServer() // Stop the gRPC server
+	stopTicker()     // Stop the background ticker
+	waitJobs()       // Wait for all indexers jobs to finish
 }
 
+// daemonStart initializes and starts the knotidx daemon.
 func daemonStart() {
 
 	slog.Info("Starting knotidx daemon")
 
-	// profile
+	// Set memory limit for debugging
 	debug.SetMemoryLimit(384 << 20)
 	defer cpuprofile()()
 
-	// Set channel notify for singals
+	// Set up channel for signal notifications
 	sigCh := watchSignals()
 
 	// Start background ticker
 	ticker = newTicker(time.Duration(gConf.Interval))
 
-	// start grpc server
-	go startGrpcServer(gConf.Grpc)
+	// Start gRPC server in a goroutine
+	go startGRPCServer(gConf.GRPC)
 
-	// Start the main daemon loop
-	// Wait for background events and OS signals
+	// Main daemon loop
 	for {
 		select {
 		case <-ticker.C:
-			// Do periodic work
+			// Periodic work
 			tick()
 		case sig := <-sigCh:
-			// Handle recieved signals
+			// Handle received signals
 			_, exit, err := handleSginal(sig)
 			if err != nil {
 				programExitCode = exit
@@ -88,121 +91,151 @@ func daemonStart() {
 				close(quitCh)
 			}
 		case <-quitCh:
+			// Quit the main loop
 			return
 		}
 	}
 }
 
+// newTicker creates a new time.Ticker with the specified duration.
 func newTicker(t time.Duration) *time.Ticker {
 	return time.NewTicker(time.Second * t)
 }
 
+// tick is a function called during each tick of the background ticker.
+// It logs information about the interval and triggers scheduled work.
 func tick() {
 	slog.Debug("Got work?", "interval", gConf.Interval)
 	scheduleWork()
 }
 
+// scheduleWork is responsible for scheduling and triggering background work based on specified conditions.
 func scheduleWork() {
+	// Get the current system idle time
 	idleTime := idle.Idle()
 
 	slog.Debug("Load AVG", "load", idle.SysinfoAvg())
 	slog.Debug("Idle time", "idle", idleTime)
 	slog.Debug("Last work was at:", "date", lastTriggerTime)
 
+	// Check if the conditions for triggering work are met
 	if (idleTime >= idleThreshold && time.Since(lastTriggerTime) >= triggerInterval) || time.UnixMicro(0) == lastTriggerTime {
 
-		// wait for unfinished jobs before schedule a new ones
+		// Wait for any unfinished jobs before scheduling new ones
 		waitJobs()
+		// Update the last trigger time to the current time
 		lastTriggerTime = time.Now()
 		slog.Info("Start addIndexers job", "time", lastTriggerTime)
+		// Create a new quit channel for indexers
 		quitWtCh = make(chan bool)
+		// Start the addIndexers job
 		addIndexers(gConf.Indexer, gStore, quitWtCh)
 	}
-
 }
 
-// Watcher goroutine
+// addWatcher is responsible for adding a watcher to the specified indexer and managing its lifecycle.
 func addWatcher(idx indexer.Indexer, quitWtCh chan bool) {
 	defer wg.Done()
 
+	// Start the watcher for the indexer
 	idx.Watch(quitWtCh)
 }
 
-// Indexer goroutine
+// addToIndex is responsible for adding items to the index using the specified indexer.
 func addToIndex(idx indexer.Indexer) {
 	defer wg.Done()
 
 	slog.Info("Starting updateIndex", "config", idx.Config())
+	// Attempt to update the index using the specified indexer
 	if err := idx.UpdateIndex(); err != nil {
 		slog.Error("new index failed", "error", err, "indexer", idx)
 	}
-
 }
 
-func addIndexers(idxConfigs []config.IndexerConfig, s store.Store, quitWtCh chan bool) {
+// addIndexers creates and starts indexers and watchers for each configuration in idxc.
+// It launches goroutines to update the index and watch for changes in the background.
+func addIndexers(idxc []config.IndexerConfig, s store.Store, qCh chan bool) {
 
-	slog.Debug("Indexers", "idx count", len(idxConfigs))
+	slog.Debug("Indexers", "idx count", len(idxc))
 
-	for _, idxConfig := range idxConfigs {
+	// Iterate over each indexer configuration
+	for _, idxConfig := range idxc {
+		// Create indexers based on the configuration
 		for _, idx := range indexer.NewIndexers(idxConfig, s) {
 
-			// Fire goroutine index
+			// Launch a goroutine to update the index
 			wg.Add(1)
 			go addToIndex(idx)
 
-			// Fire goroutine watcher
+			// Launch a goroutine to watch for changes
 			wg.Add(1)
-			go addWatcher(idx, quitWtCh)
+			go addWatcher(idx, qCh)
 		}
 	}
 }
 
-// Create and Open the store
-func newStore(conf config.StoreConfig) (s store.Store, err error) {
-	if s, err = store.NewStore(conf); err != nil {
+// newStore creates and opens a new store based on the provided configuration.
+// It returns the created store and any error encountered during creation or opening.
+func newStore(c config.StoreConfig) (store.Store, error) {
+	// Attempt to create/open the store
+	if s, err := store.NewStore(c); err != nil {
 		slog.Error("Can't create/open the store", "store", s, "error", err)
-		return
+		return s, err
 	}
-	return
+	// Return nil for both store and error if successful
+	return nil, nil
 }
 
-func resetScheduler(interval int) {
-	slog.Info("Scheduler reset", "interval", interval)
-	// Reset ticker to the new config value
-	ticker.Reset(time.Second * time.Duration(interval))
-	// Reset last background run time
+// resetScheduler resets the scheduler by updating the ticker interval and resetting the lastTriggerTime.
+// It takes an integer parameter 'in' representing the new interval in seconds.
+func resetScheduler(in int) {
+	slog.Info("Scheduler reset", "interval", in)
+	// Reset the ticker to the new interval
+	ticker.Reset(time.Second * time.Duration(in))
+	// Reset the last background run time
 	lastTriggerTime = time.UnixMicro(0)
 }
 
-// Calculate the exit code
+// getExitCode calculates the exit code based on the received OS signal.
+// It adds 128 to the signal value to create a unique exit code for each signal.
+// The resulting exit code is suitable for conveying the reason for program termination.
 func getExitCode(sig os.Signal) int {
 	return 128 + int(sig.(syscall.Signal))
 }
 
-// Handle the SIGHUP via reloading config and refresh the store
+// handleHUP handles the SIGHUP signal, typically used for reloading configurations.
+// It initiates a graceful shutdown of the daemon, closes the store, performs necessary cleanup,
+// and then restarts the daemon with the updated configuration.
+// If successful, it returns handled as true, exit as 0, and an error if any occurred.
 func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	slog.Info("Reloading...")
 	handled = false
 	exit = getExitCode(sig)
 
+	// Gracefully shut down the daemon
 	daemonShutDown()
 
+	// Close the store
 	if err = gStore.Close(); err != nil {
 		return
 	}
 
+	// Capture memory profile
 	memprofile()
 
+	// Restart the daemon with the updated configuration
 	if gConf, gStore, err = startUp(); err != nil {
 		return
 	}
 
+	// Create a new quitWtCh channel
 	quitWtCh = make(chan bool)
 
+	// Reset the scheduler with the new interval
 	resetScheduler(gConf.Interval)
 
-	// start grpc server
-	go startGrpcServer(gConf.Grpc)
+	// Start the gRPC server in a new goroutine
+	go startGRPCServer(gConf.GRPC)
 
 	handled = true
 	exit = 0
@@ -210,16 +243,22 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	return
 }
 
+// handleQuit handles termination signals (SIGINT, SIGTERM, SIGQUIT).
 func handleQuit(sig os.Signal) (bool, int, error) {
 	// exit := getExitCode(sig)
 	exit := 0
+	// Return a flag indicating the signal was handled, the exit code, and an error message
 	return true, exit, fmt.Errorf("got signal: %v", sig)
 }
 
-// Handle the OS signals
+// handleSignal handles OS signals by determining the appropriate action,
+// and returning a flag indicating if the signal was handled, the exit code, and an error message if any.
 func handleSginal(sig os.Signal) (bool, int, error) {
 	slog.Info("Got signal", "signal", sig)
+	// Get the exit code associated with the signal
 	exit := getExitCode(sig)
+
+	// Handle different signals
 	switch sig {
 	case syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
 		return handleQuit(sig)
@@ -230,14 +269,19 @@ func handleSginal(sig os.Signal) (bool, int, error) {
 	}
 }
 
-// Notify of the OS signals
-func watchSignals() (sgsCh chan os.Signal) {
-	sgsCh = make(chan os.Signal, 1)
+// watchSignals sets up a channel for notifying the program of OS signals.
+// It creates a buffered channel, registers it to receive specified signals (SIGINT, SIGTERM, SIGQUIT, SIGHUP),
+// and returns the channel for signal notifications.
+func watchSignals() chan os.Signal {
+	// Create a buffered channel for signal notifications
+	sgsCh := make(chan os.Signal, 1)
+
+	// Register the channel to receive specified signals (SIGINT, SIGTERM, SIGQUIT, SIGHUP)
 	signal.Notify(sgsCh,
 		syscall.SIGINT,
 		syscall.SIGTERM,
 		syscall.SIGQUIT,
 		syscall.SIGHUP,
 	)
-	return
+	return sgsCh
 }

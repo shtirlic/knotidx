@@ -48,31 +48,29 @@ func (s *grpcKnotidxServer) GetKeys(ctx context.Context, sr *pb.SearchRequest) (
 	return sre, nil
 }
 
-func NewGrpcServer() *grpcKnotidxServer {
-	s := &grpcKnotidxServer{}
-	return s
+func NewGRPCServer() *grpcKnotidxServer {
+	return &grpcKnotidxServer{}
 }
 
-func stopGrpcServer() {
+func stopGRPCServer() {
 	slog.Info("Stopping GRPC Server")
 	if grpcServer != nil {
 		grpcServer.GracefulStop()
 	}
 }
 
-func startGrpcServer(c config.GrpcConfig) {
+func startGRPCServer(c config.GRPCConfig) {
 	if !c.Server {
 		return
 	}
 
 	var network, address string
+	network = string(c.Type)
 
 	if c.Type == config.GrpcServerUnixType {
-		network = string(c.Type)
 		address = c.Path
 	}
 	if c.Type == config.GrpcServerTcpType {
-		network = string(c.Type)
 		host := c.Host
 		address = fmt.Sprintf("%s:%d", host, c.Port)
 	}
@@ -87,7 +85,7 @@ func startGrpcServer(c config.GrpcConfig) {
 	var opts []grpc.ServerOption
 	grpcServer = grpc.NewServer(opts...)
 
-	pb.RegisterKnotidxServer(grpcServer, NewGrpcServer())
+	pb.RegisterKnotidxServer(grpcServer, NewGRPCServer())
 	reflection.Register(grpcServer)
 
 	if err := grpcServer.Serve(lis); err != nil {

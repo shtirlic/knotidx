@@ -15,50 +15,63 @@ import (
 )
 
 const (
-	DirItemType  store.ItemType = "dir"
+	// DirItemType represents the item type for directories.
+	DirItemType store.ItemType = "dir"
+
+	// FileItemType represents the item type for files.
 	FileItemType store.ItemType = "file"
 
-	FsIndexerType IndexerType = "fs"
+	// FileSystemIndexerType represents the type of the FileSystemIndexer.
+	FileSystemIndexerType IndexerType = "fs"
 )
 
+// FileSystemIndexer represents an indexer implementation for the filesystem.
 type FileSystemIndexer struct {
-	RootPath           string
-	ExcludeDirFilters  []string
-	ExcludeFileFilters []string
-	Store              store.Store
-	watcher            *fsnotify.Watcher
-	config             config.IndexerConfig
+	RootPath           string               // RootPath is the root directory path to be indexed.
+	ExcludeDirFilters  []string             // ExcludeDirFilters contains filters for excluding directories.
+	ExcludeFileFilters []string             // ExcludeFileFilters contains filters for excluding files.
+	Store              store.Store          // Store is the data store to index items.
+	watcher            *fsnotify.Watcher    // watcher is used to monitor file system events.
+	config             config.IndexerConfig // config is the configuration for the indexer.
 }
 
+// Watch monitors the file system for events and updates the index accordingly.
 func (idx *FileSystemIndexer) Watch(quit chan bool) {
 
+	// Check if the watcher is initialized.
 	if idx.watcher == nil {
 		return
 	}
-
+	// Close the watcher when the function exits.
 	defer idx.watcher.Close()
 
 	slog.Debug("Watcher events select", "idx RootPath", idx.RootPath)
 
+	// Infinite loop to continuously monitor file system events.
 	for {
 		select {
+		// Handle file system events.
 		case event, ok := <-idx.watcher.Events:
 			if !ok {
 				return
 			}
 			slog.Debug("Watcher", "event", event)
 
+			// Process different types of file system events.
 			switch event.Op {
 			case fsnotify.Chmod, fsnotify.Write, fsnotify.Create:
-				idx.addPath(event.Name)
+				idx.addPath(event.Name) // Add or update the path in the index.
 			case fsnotify.Remove, fsnotify.Rename:
-				idx.removePath(event.Name)
+				idx.removePath(event.Name) // Remove the path from the index.
 			}
+		// Handle errors from the watcher.
 		case err, ok := <-idx.watcher.Errors:
 			if !ok {
 				return
 			}
 			slog.Debug("Watcher", "error", err)
+
+			// Handle quit signal to stop the watcher.
 		case <-quit:
 			slog.Debug("Quit watcher", "idx RootPath", idx.RootPath)
 			return
@@ -66,16 +79,21 @@ func (idx *FileSystemIndexer) Watch(quit chan bool) {
 	}
 }
 
+// Type returns the type of the FileSystemIndexer.
 func (idx *FileSystemIndexer) Type() IndexerType {
-	return FsIndexerType
+	return FileSystemIndexerType
 }
 
+// Config returns the configuration of the FileSystemIndexer.
 func (idx *FileSystemIndexer) Config() config.IndexerConfig {
 	return idx.config
 }
 
+// NewFileSystemIndexer creates a new instance of FileSystemIndexer with the provided store,
+// rootPath, and configuration. It returns an Indexer interface.
 func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerConfig) Indexer {
 
+	// Initialize excludeDirFilters and excludeFileFilters with default values if not provided.
 	excludeDirFilters := c.ExcludeDirFilters
 	excludeFileFilters := c.ExcludeFileFilters
 
@@ -86,6 +104,7 @@ func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerCo
 		excludeFileFilters = DefaultExcludeFileFilters()
 	}
 
+	// Create a new FileSystemIndexer instance.
 	fsi := &FileSystemIndexer{
 		RootPath:           filepath.Clean(rootPath),
 		ExcludeDirFilters:  excludeDirFilters,
@@ -93,14 +112,18 @@ func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerCo
 		Store:              store,
 		config:             c,
 	}
-	// TODO: handle error
-	// Enbale fs notify watcher
+
+	// Enable fsnotify watcher if Notify is true in the configuration.
 	if c.Notify {
 		fsi.watcher, _ = fsnotify.NewWatcher()
 	}
+	// TODO: Handle error returned from fsnotify.NewWatcher().
+	// Returning the created FileSystemIndexer.
 	return fsi
 }
 
+// ItemType returns the appropriate store.ItemType based on the given boolean value isDir.
+// If isDir is true, it returns DirItemType; otherwise, it returns FileItemType.
 func ItemType(isDir bool) store.ItemType {
 	if isDir {
 		return DirItemType
@@ -108,13 +131,21 @@ func ItemType(isDir bool) store.ItemType {
 	return FileItemType
 }
 
+// CleanIndex removes items from the index that match the specified prefix.
+// It iterates through the keys in the store with the given prefix and validates
+// whether the corresponding paths still exist on the file system. If not, it deletes
+// the corresponding key from the store.
 func (idx *FileSystemIndexer) CleanIndex(prefix string) error {
-
+	// Add indexer type prefix to the provided prefix.
 	prefix = string(idx.Type()) + "_" + prefix
 
+	// Iterate through keys with the specified prefix.
 	for _, key := range idx.Store.Keys(prefix, "", 0) {
+		// Split the key into components.
 		item := strings.SplitN(key, "_", 3)
 		path := item[2]
+
+		// Retrieve file info for the path.
 		fi, err := os.Lstat(path)
 		if err != nil {
 			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
@@ -124,51 +155,76 @@ func (idx *FileSystemIndexer) CleanIndex(prefix string) error {
 				continue
 			}
 		}
+		// Check if the file is a directory and the stored item type matches.
+
 		if fi.IsDir() && store.ItemType(item[1]) != DirItemType {
 			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+
+			// Delete the key from the store if the types do not match.
 			if err = idx.Store.Delete(key); err != nil {
 				return err
 			}
 		}
+		// Check if the file is not a directory and the stored item type matches.
 		if !fi.IsDir() && store.ItemType(item[1]) != FileItemType {
 			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+
+			// Delete the key from the store if the types do not match.
 			if err = idx.Store.Delete(key); err != nil {
 				return err
 			}
 		}
 	}
+	// Return nil to indicate a successful cleaning operation.
 	return nil
 }
 
-func (idx *FileSystemIndexer) UpdateIndex() (err error) {
-	err = idx.CleanIndex("")
-	if err != nil {
-		return
+// UpdateIndex updates the index by first cleaning it to remove stale entries
+// and then adding the paths starting from the root path.
+func (idx *FileSystemIndexer) UpdateIndex() error {
+
+	// Clean the index to remove stale entries.
+	if err := idx.CleanIndex(""); err != nil {
+		return err
 	}
 
-	err = idx.addPath(idx.RootPath)
-	if err != nil {
-		return
+	// Add the root path and its subdirectories to the index.
+	if err := idx.addPath(idx.RootPath); err != nil {
+		return err
 	}
 
+	// Perform maintenance operations on the store.
 	idx.Store.Maintenance()
-	return
+
+	// Return nil to indicate a successful update.
+	return nil
 }
 
+// removePath removes entries from the index associated with the specified path.
+// It cleans both directory and file entries for the given path.
 func (idx *FileSystemIndexer) removePath(path string) {
 	path = filepath.Clean(path)
+
+	// Clean directory entries associated with the path.
 	idx.CleanIndex("dir_" + path)
+
+	// Clean file entries associated with the path.
 	idx.CleanIndex("file_" + path)
 }
 
+// addPath recursively traverses the file system starting from the specified path and adds
+// directory and file entries to the index. It skips directories based on exclude directory filters
+// and files based on exclude file filters. The function also handles batch insertion of items into
+// the store to improve efficiency.
 func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 
+	// If newPath is empty, use the root path of the indexer.
 	if newPath == "" {
 		newPath = idx.RootPath
 	}
 	newPath = filepath.Clean(newPath)
 
-	// Return if no access to path
+	// Retrieve file info for the specified path.
 	path, err := os.Stat(newPath)
 	if err != nil {
 		slog.Error("Can't get fileinfo for path:", "error", err, "path", path)
@@ -192,39 +248,40 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 	// 	slog.Info("not found in index, adding", "key", rootFileInfo.KeyName())
 	// }
 
+	// Initialize counters for directory and file sizes in the index.
 	idxSize := 0
 	idxDirSize := 0
 	idxFileSize := 0
 
-	// Map for storing file/dir entries
+	// Map for storing file/dir entries.
 	itemList := make(map[string]store.ItemInfo)
 
-	// List for failed file/dir items
+	// List for failed file/dir items.
 	var failedItems []string
 
-	// Walking from the root path recursevly
+	// Walk the file system starting from the specified path.
 	err = filepath.Walk(newPath, func(path string, info os.FileInfo, err error) error {
 
-		// Skip access denied etc and add to failed list
+		// Skip access denied, etc., and add to the failed list.
 		if err != nil {
 			slog.Debug("Inside Walk", "err", err, "path", path)
 			failedItems = append(failedItems, path)
 			return filepath.SkipDir
 		}
 
-		// Skip dirs via exclude dir filters
+		// Skip dirs via exclude dir filters.
 		if info.IsDir() && slices.Contains(idx.ExcludeDirFilters, info.Name()) {
 			return filepath.SkipDir
 		}
 
 		// TODO: Try to use Match/Glob for file masks
 		// NOTICE: file masks are not working now
-		// Skip files via exclude file filters
+		// Skip files via exclude file filters.
 		if !info.IsDir() && slices.Contains(idx.ExcludeFileFilters, info.Name()) {
 			return nil
 		}
 
-		// Create ItemInfo for index addtion
+		// Create ItemInfo for index addition.
 		itemInfo := store.NewItemInfo(
 			info.Name(),
 			path,
@@ -232,31 +289,34 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 			info.Size(),
 			ItemType(info.IsDir()))
 
-		// Get the mimetype for file by extension
+		// Get the mimetype for files by extension.
 		if itemInfo.Type == FileItemType {
 			idxFileSize++
 			itemInfo.MimeType = mime.TypeByExtension(filepath.Ext(path))
 		} else {
+			// Add directories to the file system watcher.
 			if idx.watcher != nil {
 				idx.watcher.Add(path)
 			}
 			idxDirSize++
 		}
-		// Calc hash
+		// Calculate the hash.
 		itemInfo.Hash = itemInfo.XXhash()
 
+		// Create the key for the item in the format "indexerType_path".
 		key := fmt.Sprintf("%s_%s", idx.Type(), itemInfo.KeyName())
-		// Add to items list
+		// Add the item to the items list.
 		itemList[key] = itemInfo
 		idxSize++
 
-		// Add items to store in batches
+		// Add items to the store in batches.
 		if len(itemList) > store.BatchCount {
 			err = idx.Store.Add(itemList)
 			if err != nil {
 				slog.Error("can't add items to store")
 				return err
 			}
+			// Clear the items list after successful batch insertion.
 			clear(itemList)
 		}
 		return err
@@ -266,7 +326,7 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 		return
 	}
 
-	// Add remaining items after batch inserts
+	// Add remaining items after batch inserts.
 	if len(itemList) > 0 {
 		err = idx.Store.Add(itemList)
 		if err != nil {
