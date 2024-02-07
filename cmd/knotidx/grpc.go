@@ -5,16 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"syscall"
 
 	"github.com/shtirlic/knotidx/internal/config"
 	"github.com/shtirlic/knotidx/internal/pb"
+	"github.com/shtirlic/knotidx/internal/store"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
 )
 
 var (
 	grpcServer *grpc.Server
+	grpcStore  store.Store
+	grpcConfig config.GRPCConfig
 )
 
 type grpcKnotidxServer struct {
@@ -22,23 +25,23 @@ type grpcKnotidxServer struct {
 }
 
 func (s *grpcKnotidxServer) ResetScheduler(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
-	resetScheduler(gConf.Interval)
+	resetScheduler(daemonConf.Interval)
 	return &pb.EmptyResponse{}, nil
 }
 
 func (s *grpcKnotidxServer) Reload(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
-	syscall.Kill(syscall.Getpid(), syscall.SIGHUP)
+	unix.Kill(unix.Getpid(), unix.SIGHUP)
 	return &pb.EmptyResponse{}, nil
 }
 
 func (s *grpcKnotidxServer) Shutdown(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
-	syscall.Kill(syscall.Getpid(), syscall.SIGQUIT)
+	unix.Kill(unix.Getpid(), unix.SIGQUIT)
 	return &pb.EmptyResponse{}, nil
 }
 
 func (s *grpcKnotidxServer) GetKeys(ctx context.Context, sr *pb.SearchRequest) (*pb.SearchResponse, error) {
 	slog.Debug("search request", "text", sr.Query)
-	keys := gStore.Keys("", sr.Query, 100)
+	keys := grpcStore.Keys("", sr.Query, 100)
 
 	var results []*pb.SearchItemResponse
 	for _, key := range keys {
@@ -59,20 +62,22 @@ func stopGRPCServer() {
 	}
 }
 
-func startGRPCServer(c config.GRPCConfig) {
-	if !c.Server {
+func startGRPCServer(c config.Config, s store.Store) {
+	grpcConfig = c.GRPC
+	grpcStore = s
+	if !grpcConfig.Server {
 		return
 	}
 
 	var network, address string
-	network = string(c.Type)
+	network = string(grpcConfig.Type)
 
-	if c.Type == config.GrpcServerUnixType {
-		address = c.Path
+	if grpcConfig.Type == config.GrpcServerUnixType {
+		address = grpcConfig.Path
 	}
-	if c.Type == config.GrpcServerTcpType {
-		host := c.Host
-		address = fmt.Sprintf("%s:%d", host, c.Port)
+	if grpcConfig.Type == config.GrpcServerTcpType {
+		host := grpcConfig.Host
+		address = fmt.Sprintf("%s:%d", host, grpcConfig.Port)
 	}
 
 	slog.Info("Starting GRPC Server", "address", address, "network", network)

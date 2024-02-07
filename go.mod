@@ -7,6 +7,7 @@ require (
 	github.com/cespare/xxhash/v2 v2.2.0
 	github.com/dgraph-io/badger/v4 v4.2.0
 	github.com/fsnotify/fsnotify v1.7.0
+	golang.org/x/sys v0.16.0
 	google.golang.org/protobuf v1.32.0
 )
 
@@ -28,6 +29,5 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.20.0 // indirect
-	golang.org/x/sys v0.16.0 // indirect
 	google.golang.org/grpc v1.60.1
 )

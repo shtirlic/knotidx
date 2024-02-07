@@ -2,7 +2,8 @@ package idle
 
 import (
 	"runtime"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // loadAvg represents system load averages over different time intervals.
@@ -22,8 +23,8 @@ func Idle() float64 {
 // SysinfoAvg retrieves system load averages (1, 5, and 15 minutes) and returns
 // them as a loadAvg struct.
 func SysinfoAvg() loadAvg {
-	var info syscall.Sysinfo_t
-	err := syscall.Sysinfo(&info)
+	var info unix.Sysinfo_t
+	err := unix.Sysinfo(&info)
 	if err != nil {
 		return loadAvg{}
 	}

@@ -24,9 +24,6 @@ var (
 	programLevel         = new(slog.LevelVar) // Info by default
 	programProfiler bool = false
 
-	gConf  config.Config
-	gStore store.Store
-
 	daemonCmd      = flag.Bool("daemon", false, "run knotidx daemon")
 	showConfigCmd  = flag.Bool("show-config", false, "show knotidx config")
 	checkConfigCmd = flag.Bool("check-config", false, "check knotidx config for errors")
@@ -59,8 +56,10 @@ func main() {
 	programLevel.Set(slog.LevelDebug)
 
 	slog.Info("build info", "version", version, "commit", commit, "date", date)
+	var conf config.Config
+	var s store.Store
 
-	defer shutDown()
+	defer shutDown(s)
 
 	if *showConfigCmd {
 		showConfig()
@@ -71,21 +70,20 @@ func main() {
 	}
 
 	// Load configs and open store
-	if gConf, gStore, programErr = startUp(); programErr != nil {
+	if conf, s, programErr = startUp(); programErr != nil {
 		return
 	}
-
 	if *daemonCmd {
-		daemonStart()
+		programExitCode, programErr = daemonStart(conf, s)
 	}
 
 	if *clientCmd {
-		programErr = idxClient()
+		programErr = idxClient(conf.GRPC)
 	}
 }
 
 // Do program shutdown
-func shutDown() {
+func shutDown(s store.Store) {
 	slog.Info("Stoopping knotidx")
 
 	// If cmd was run in daemon mode
@@ -94,9 +92,9 @@ func shutDown() {
 	}
 
 	// Close the store
-	if gStore != nil {
+	if s != nil {
 		// TODO: wrap err
-		gStore.Close()
+		s.Close()
 	}
 
 	if programErr != nil && programExitCode != 0 {

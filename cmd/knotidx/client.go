@@ -8,18 +8,18 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/shtirlic/knotidx/internal/config"
 	"github.com/shtirlic/knotidx/internal/pb"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func idxClient() error {
+func idxClient(c config.GRPCConfig) error {
 
 	var opts []grpc.DialOption
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	var address string
-	c := gConf.GRPC
 
 	if c.Type == "unix" {
 		address = fmt.Sprintf("unix://%s", c.Path)

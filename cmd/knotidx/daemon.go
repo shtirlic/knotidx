@@ -7,13 +7,13 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/shtirlic/knotidx/internal/config"
 	"github.com/shtirlic/knotidx/internal/idle"
 	"github.com/shtirlic/knotidx/internal/indexer"
 	"github.com/shtirlic/knotidx/internal/store"
+	"golang.org/x/sys/unix"
 )
 
 // Constants defining thresholds and intervals
@@ -33,6 +33,9 @@ var (
 	quitWtCh chan bool = make(chan bool) // Channel for quitting the worker goroutine
 
 	lastTriggerTime time.Time = time.UnixMicro(0) // Time of the last triggered action
+
+	daemonConf  config.Config
+	daemonStore store.Store
 )
 
 // stopTicker stops the background ticker
@@ -53,13 +56,15 @@ func waitJobs() {
 
 // daemonShutDown performs shutdown actions for the daemon.
 func daemonShutDown() {
-	stopGRPCServer() // Stop the gRPC server
 	stopTicker()     // Stop the background ticker
 	waitJobs()       // Wait for all indexers jobs to finish
+	stopGRPCServer() // Stop the gRPC server
 }
 
 // daemonStart initializes and starts the knotidx daemon.
-func daemonStart() {
+func daemonStart(c config.Config, s store.Store) (int, error) {
+	daemonConf = c
+	daemonStore = s
 
 	slog.Info("Starting knotidx daemon")
 
@@ -71,10 +76,13 @@ func daemonStart() {
 	sigCh := watchSignals()
 
 	// Start background ticker
-	ticker = newTicker(time.Duration(gConf.Interval))
+	ticker = newTicker(time.Duration(daemonConf.Interval))
 
 	// Start gRPC server in a goroutine
-	go startGRPCServer(gConf.GRPC)
+	go startGRPCServer(daemonConf, daemonStore)
+
+	var daemonErr error
+	var daemonExitCode int
 
 	// Main daemon loop
 	for {
@@ -86,13 +94,13 @@ func daemonStart() {
 			// Handle received signals
 			_, exit, err := handleSginal(sig)
 			if err != nil {
-				programExitCode = exit
-				programErr = err
+				daemonExitCode = exit
+				daemonErr = err
 				close(quitCh)
 			}
 		case <-quitCh:
 			// Quit the main loop
-			return
+			return daemonExitCode, daemonErr
 		}
 	}
 }
@@ -105,7 +113,7 @@ func newTicker(t time.Duration) *time.Ticker {
 // tick is a function called during each tick of the background ticker.
 // It logs information about the interval and triggers scheduled work.
 func tick() {
-	slog.Debug("Got work?", "interval", gConf.Interval)
+	slog.Debug("Got work?", "interval", daemonConf.Interval)
 	scheduleWork()
 }
 
@@ -125,11 +133,11 @@ func scheduleWork() {
 		waitJobs()
 		// Update the last trigger time to the current time
 		lastTriggerTime = time.Now()
-		slog.Info("Start addIndexers job", "time", lastTriggerTime)
+		slog.Info("Start addIndexers job", "time", lastTriggerTime, daemonStore)
 		// Create a new quit channel for indexers
 		quitWtCh = make(chan bool)
 		// Start the addIndexers job
-		addIndexers(gConf.Indexer, gStore, quitWtCh)
+		addIndexers(daemonConf.Indexer, daemonStore, quitWtCh)
 	}
 }
 
@@ -178,12 +186,12 @@ func addIndexers(idxc []config.IndexerConfig, s store.Store, qCh chan bool) {
 // It returns the created store and any error encountered during creation or opening.
 func newStore(c config.StoreConfig) (store.Store, error) {
 	// Attempt to create/open the store
-	if s, err := store.NewStore(c); err != nil {
+	s, err := store.NewStore(c)
+	if err != nil {
 		slog.Error("Can't create/open the store", "store", s, "error", err)
-		return s, err
+		return nil, err
 	}
-	// Return nil for both store and error if successful
-	return nil, nil
+	return s, nil
 }
 
 // resetScheduler resets the scheduler by updating the ticker interval and resetting the lastTriggerTime.
@@ -200,7 +208,7 @@ func resetScheduler(in int) {
 // It adds 128 to the signal value to create a unique exit code for each signal.
 // The resulting exit code is suitable for conveying the reason for program termination.
 func getExitCode(sig os.Signal) int {
-	return 128 + int(sig.(syscall.Signal))
+	return 128 + int(sig.(unix.Signal))
 }
 
 // handleHUP handles the SIGHUP signal, typically used for reloading configurations.
@@ -216,7 +224,7 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	daemonShutDown()
 
 	// Close the store
-	if err = gStore.Close(); err != nil {
+	if err = daemonStore.Close(); err != nil {
 		return
 	}
 
@@ -224,7 +232,7 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	memprofile()
 
 	// Restart the daemon with the updated configuration
-	if gConf, gStore, err = startUp(); err != nil {
+	if daemonConf, daemonStore, err = startUp(); err != nil {
 		return
 	}
 
@@ -232,10 +240,10 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	quitWtCh = make(chan bool)
 
 	// Reset the scheduler with the new interval
-	resetScheduler(gConf.Interval)
+	resetScheduler(daemonConf.Interval)
 
 	// Start the gRPC server in a new goroutine
-	go startGRPCServer(gConf.GRPC)
+	go startGRPCServer(daemonConf, daemonStore)
 
 	handled = true
 	exit = 0
@@ -260,9 +268,9 @@ func handleSginal(sig os.Signal) (bool, int, error) {
 
 	// Handle different signals
 	switch sig {
-	case syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT:
+	case unix.SIGINT, unix.SIGTERM, unix.SIGQUIT:
 		return handleQuit(sig)
-	case syscall.SIGHUP:
+	case unix.SIGHUP:
 		return handleHUP(sig)
 	default:
 		return false, exit, fmt.Errorf("signal %v not handled", sig)
@@ -278,10 +286,10 @@ func watchSignals() chan os.Signal {
 
 	// Register the channel to receive specified signals (SIGINT, SIGTERM, SIGQUIT, SIGHUP)
 	signal.Notify(sgsCh,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT,
-		syscall.SIGHUP,
+		unix.SIGINT,
+		unix.SIGTERM,
+		unix.SIGQUIT,
+		unix.SIGHUP,
 	)
 	return sgsCh
 }
