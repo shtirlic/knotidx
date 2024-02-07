@@ -30,7 +30,7 @@ var (
 	wg sync.WaitGroup // WaitGroup for coordinating goroutines
 
 	quitCh   chan bool = make(chan bool) // Channel for quitting the main loop
-	quitWtCh chan bool = make(chan bool) // Channel for quitting the worker goroutine
+	quitWtCh chan bool = make(chan bool) // Channel for quitting the watcher goroutine
 
 	lastTriggerTime time.Time = time.UnixMicro(0) // Time of the last triggered action
 
