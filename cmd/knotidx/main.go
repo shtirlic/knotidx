@@ -116,10 +116,10 @@ func startUp() (c config.Config, s store.Store, err error) {
 	if c, err = reloadConfig(); err != nil {
 		return
 	}
-	// Open the store
-	if s, err = newStore(c.Store); err != nil {
+	if *clientCmd {
 		return
 	}
+	s, err = newStore(c.Store)
 	return
 }
 
