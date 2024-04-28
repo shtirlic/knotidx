@@ -19,7 +19,7 @@ jobs:
     - name: Get current date
       id: date
       run: |
-        echo "{date}={$(date +'%Y%m')}" >> $GITHUB_STATE
+        echo "{date}={$(date +'%Y%m')}" >> $GITHUB_ENV
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
