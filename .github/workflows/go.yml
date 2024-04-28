@@ -19,18 +19,16 @@ jobs:
     - name: Get current date
       id: date
       run: |
-        echo "{date}={$(date +'%Y%m')}" >> $GITHUB_ENV
+        echo "DATE={$(date +'%Y%m')}" >> $GITHUB_ENV
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.22'
-
     - name: Build knotidx
       run: go build -v ./cmd/knotidx
-
     - name: Archive production artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: knotidx-release-${{ env.date }}-${{ github.ref_name }}-${{ github.sha }}
+        name: knotidx-release-${{ env.DATE }}-${{ github.ref_name }}-${{ github.sha }}
         path: |
           knotidx
