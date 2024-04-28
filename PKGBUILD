@@ -1,6 +1,6 @@
 # Maintainer: Serg Podtynnyi <serg@podtynnyi.com>
 pkgname=knotidx-git
-pkgver=0.1.r3.a24d652
+pkgver=0.1.r16.7bdb293
 pkgrel=1
 pkgdesc=""
 arch=('1686' 'x86_64' 'armv7h' 'armv6h' 'aarch64')
@@ -32,7 +32,7 @@ build() {
   export CGO_CFLAGS="${CFLAGS}"
   export CGO_CXXFLAGS="${CXXFLAGS}"
 	export GOFLAGS="-buildmode=pie -trimpath -mod=readonly -modcacherw"
-	go build -o knotidx -ldflags "-extldflags ${LDFLAGS} -s -w -X main.version=${pkgver}  -X main.date=$(date -u +%Y%m%d.%H%M%S) -X main.commit=$(git rev-parse --short HEAD)" cmd/knotidx/*
+	go build -o knotidx -ldflags "-s -w -X main.version=${pkgver}  -X main.date=$(date -u +%Y%m%d.%H%M%S) -X main.commit=$(git rev-parse --short HEAD)" cmd/knotidx/*
 }
 
 package() {
