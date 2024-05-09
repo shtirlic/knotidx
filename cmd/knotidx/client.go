@@ -17,6 +17,8 @@ import (
 func idxClient(c config.GRPCConfig) error {
 
 	var opts []grpc.DialOption
+	var err error
+	var jr []byte
 	opts = append(opts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 
 	var address string
@@ -39,7 +41,9 @@ func idxClient(c config.GRPCConfig) error {
 	grpcClient := pb.NewKnotidxClient(conn)
 	s := bufio.NewScanner(os.Stdin)
 
-	fmt.Print("Enter query: ")
+	if !*jsonCmd {
+		fmt.Print("Enter query: ")
+	}
 	for s.Scan() {
 		text := s.Text()
 		res, err := grpcClient.GetKeys(context.Background(), &pb.SearchRequest{Query: text})
@@ -47,14 +51,24 @@ func idxClient(c config.GRPCConfig) error {
 			return err
 		}
 
-		jr, err := json.MarshalIndent(res.Results, "", "\t")
+		// if *jsonCmd {
+		// jr, err = json.Marshal(res.Results)
+		// } else {
+		jr, err = json.MarshalIndent(res.Results, "", "\t")
+		// }
+
 		if err != nil {
 			return err
 		}
-
-		fmt.Println("Results", "results")
-		fmt.Println(string(jr))
-		fmt.Print("Enter query: ")
+		if *jsonCmd {
+			fmt.Println(string(jr))
+			programExitCode = 0
+			return nil
+		} else {
+			fmt.Println("Results", "results")
+			fmt.Println(string(jr))
+			fmt.Print("Enter query: ")
+		}
 	}
 	programExitCode = 0
 	return nil

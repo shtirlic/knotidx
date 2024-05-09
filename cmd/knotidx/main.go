@@ -28,6 +28,7 @@ var (
 	showConfigCmd  = flag.Bool("show-config", false, "show knotidx config")
 	checkConfigCmd = flag.Bool("check-config", false, "check knotidx config for errors")
 	clientCmd      = flag.Bool("client", false, "interactive index search")
+	jsonCmd        = flag.Bool("json", false, "json only output")
 )
 
 func main() {
@@ -52,8 +53,11 @@ func main() {
 	// slog.String("program", programName),
 	// slog.Int("pid", os.Getpid()),
 	))
-
 	programLevel.Set(slog.LevelDebug)
+
+	if *jsonCmd {
+		programLevel.Set(slog.LevelError)
+	}
 
 	slog.Info("build info", "version", version, "commit", commit, "date", date)
 	var conf config.Config
