@@ -19,14 +19,14 @@ type Store interface {
 	Close() error                                           // Close the store.
 	Reset() error                                           // Reset the store.
 	Delete(key string) error                                // Delete a key from the store.
-	Find(key string) *ItemInfo                              // Find information about a key in the store.
+	Find(key string) ItemInfo                               // Find information about a key in the store.
 	Info() string                                           // Get information about the store.
 	Maintenance()                                           // Perform maintenance tasks on the store.
 	Type() DatabaseType                                     // Get the type of the database.
 	Keys(prefix string, pattern string, limit int) []string // Get keys based on prefix, pattern, and limit.
 
 	Add(map[string]ItemInfo) error // Add items to the store.
-	Items() ([]*ItemInfo, error)   // Get all items from the store.
+	Items() ([]*ItemInfo, error)   // Get all items from the store. // DEBUG func
 }
 
 // BatchCount specifies the batch count for store operations.

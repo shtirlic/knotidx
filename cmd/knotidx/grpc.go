@@ -14,70 +14,73 @@ import (
 	"google.golang.org/grpc/reflection"
 )
 
-var (
-	grpcServer *grpc.Server
-	grpcStore  store.Store
-	grpcConfig config.GRPCConfig
-)
-
-type grpcKnotidxServer struct {
+type GRPServer struct {
+	server *grpc.Server
+	store  store.Store
+	config config.Config
 	pb.UnimplementedKnotidxServer
 }
 
-func (s *grpcKnotidxServer) ResetScheduler(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
-	resetScheduler(daemonConf.Interval)
+func (s *GRPServer) ResetScheduler(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
+	//  resetScheduler(daemonConf.Interval) //todo fix daemon
 	return &pb.EmptyResponse{}, nil
 }
 
-func (s *grpcKnotidxServer) Reload(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
+func (s *GRPServer) Reload(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
 	unix.Kill(unix.Getpid(), unix.SIGHUP)
 	return &pb.EmptyResponse{}, nil
 }
 
-func (s *grpcKnotidxServer) Shutdown(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
+func (s *GRPServer) Shutdown(context.Context, *pb.EmptyRequest) (*pb.EmptyResponse, error) {
 	unix.Kill(unix.Getpid(), unix.SIGQUIT)
 	return &pb.EmptyResponse{}, nil
 }
 
-func (s *grpcKnotidxServer) GetKeys(ctx context.Context, sr *pb.SearchRequest) (*pb.SearchResponse, error) {
-	slog.Debug("search request", "text", sr.Query)
-	keys := grpcStore.Keys("", sr.Query, 100)
+func (s *GRPServer) GetKeys(ctx context.Context, sr *pb.SearchRequest) (*pb.SearchResponse, error) {
+	keys := s.store.Keys("", sr.Query, 100)
 
-	var results []*pb.SearchItemResponse
+	sre := &pb.SearchResponse{}
 	for _, key := range keys {
-		results = append(results, &pb.SearchItemResponse{Key: key})
+		sre.Results = append(sre.Results, &pb.SearchItemResponse{Key: key})
 	}
-	sre := &pb.SearchResponse{Results: results, Count: int32(len(results))}
+	sre.Count = int32(len(sre.Results))
+
+	slog.Debug("GRPC Search request", "text", sr.Query, "results", sre.Count)
 	return sre, nil
 }
 
-func NewGRPCServer() *grpcKnotidxServer {
-	return &grpcKnotidxServer{}
-}
-
-func stopGRPCServer() {
-	slog.Info("Stopping GRPC Server")
-	if grpcServer != nil {
-		grpcServer.GracefulStop()
+func NewGRPCServer(c config.Config, s store.Store) *GRPServer {
+	return &GRPServer{
+		config: c,
+		store:  s,
 	}
 }
 
-func startGRPCServer(c config.Config, s store.Store) {
-	grpcConfig = c.GRPC
-	grpcStore = s
-	if !grpcConfig.Server {
+func (s *GRPServer) Enabled() bool {
+	return s.config.GRPC.Server
+}
+
+func (s *GRPServer) Stop() {
+	slog.Info("Stopping GRPC Server")
+	if s.server != nil {
+		s.server.GracefulStop()
+	}
+}
+
+func (s *GRPServer) Start() {
+	if !s.Enabled() {
 		return
 	}
 
 	var network, address string
-	network = string(grpcConfig.Type)
+	network = string(s.config.GRPC.Type)
 
-	if grpcConfig.Type == config.GrpcServerUnixType {
-		address = grpcConfig.Path
+	if s.config.GRPC.Type == config.GrpcServerUnixType {
+		address = s.config.GRPC.Path
 	}
-	if grpcConfig.Type == config.GrpcServerTcpType {
-		host := grpcConfig.Host
-		address = fmt.Sprintf("%s:%d", host, grpcConfig.Port)
+	if s.config.GRPC.Type == config.GrpcServerTcpType {
+		host := s.config.GRPC.Host
+		address = fmt.Sprintf("%s:%d", host, s.config.GRPC.Port)
 	}
 
 	slog.Info("Starting GRPC Server", "address", address, "network", network)
@@ -88,14 +91,13 @@ func startGRPCServer(c config.Config, s store.Store) {
 		return
 	}
 	var opts []grpc.ServerOption
-	grpcServer = grpc.NewServer(opts...)
+	s.server = grpc.NewServer(opts...)
 
-	pb.RegisterKnotidxServer(grpcServer, NewGRPCServer())
-	reflection.Register(grpcServer)
+	pb.RegisterKnotidxServer(s.server, s)
+	reflection.Register(s.server)
 
-	if err := grpcServer.Serve(lis); err != nil {
+	if err := s.server.Serve(lis); err != nil {
 		slog.Error("Can't start GRPC Server", "err", err)
-		grpcServer = nil
+		s.server = nil
 	}
-
 }

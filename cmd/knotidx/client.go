@@ -15,7 +15,17 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func idxClient(c config.GRPCConfig) error {
+type Client struct {
+	config config.GRPCConfig
+}
+
+func NewClient(c config.GRPCConfig) *Client {
+	return &Client{
+		config: c,
+	}
+}
+
+func (c *Client) Start() (int, error) {
 
 	var opts []grpc.DialOption
 	var err error
@@ -24,18 +34,18 @@ func idxClient(c config.GRPCConfig) error {
 
 	var address string
 
-	if c.Type == "unix" {
-		address = fmt.Sprintf("unix://%s", c.Path)
+	if c.config.Type == "unix" {
+		address = fmt.Sprintf("unix://%s", c.config.Path)
 	}
-	if c.Type == "tcp" {
+	if c.config.Type == "tcp" {
 		host := "localhost"
-		address = fmt.Sprintf("%s:%d", host, c.Port)
+		address = fmt.Sprintf("%s:%d", host, c.config.Port)
 	}
 
 	slog.Info("GRPC Client Connect", "address", address)
 	conn, err := grpc.Dial(address, opts...)
 	if err != nil {
-		return err
+		return 1, err
 	}
 	defer conn.Close()
 
@@ -49,7 +59,7 @@ func idxClient(c config.GRPCConfig) error {
 		text := s.Text()
 		res, err := grpcClient.GetKeys(context.Background(), &pb.SearchRequest{Query: text})
 		if err != nil {
-			return err
+			return 1, err
 		}
 
 		// if *jsonCmd {
@@ -59,18 +69,16 @@ func idxClient(c config.GRPCConfig) error {
 		// }
 
 		if err != nil {
-			return err
+			return 1, err
 		}
 		if *jsonCmd {
 			fmt.Println(string(jr))
-			programExitCode = 0
-			return nil
+			return 0, nil
 		} else {
 			fmt.Println("Results", "results")
 			fmt.Println(string(jr))
 			fmt.Print("Enter query: ")
 		}
 	}
-	programExitCode = 0
-	return nil
+	return 0, nil
 }

@@ -1,6 +1,8 @@
 package indexer
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"mime"
@@ -8,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/shtirlic/knotidx/internal/config"
@@ -33,10 +36,11 @@ type FileSystemIndexer struct {
 	Store              store.Store          // Store is the data store to index items.
 	watcher            *fsnotify.Watcher    // watcher is used to monitor file system events.
 	config             config.IndexerConfig // config is the configuration for the indexer.
+	ctx                context.Context      // ctx is the cancel conext.
 }
 
 // Watch monitors the file system for events and updates the index accordingly.
-func (idx *FileSystemIndexer) Watch(quit chan bool) {
+func (idx *FileSystemIndexer) Watch() {
 
 	// Check if the watcher is initialized.
 	if idx.watcher == nil {
@@ -71,8 +75,8 @@ func (idx *FileSystemIndexer) Watch(quit chan bool) {
 			}
 			slog.Debug("Watcher", "error", err)
 
-			// Handle quit signal to stop the watcher.
-		case <-quit:
+		// check for contex done channel for cancel.
+		case <-idx.ctx.Done():
 			slog.Debug("Quit watcher", "idx RootPath", idx.RootPath)
 			return
 		}
@@ -91,7 +95,7 @@ func (idx *FileSystemIndexer) Config() config.IndexerConfig {
 
 // NewFileSystemIndexer creates a new instance of FileSystemIndexer with the provided store,
 // rootPath, and configuration. It returns an Indexer interface.
-func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerConfig) Indexer {
+func NewFileSystemIndexer(ctx context.Context, store store.Store, rootPath string, c config.IndexerConfig) Indexer {
 
 	// Initialize excludeDirFilters and excludeFileFilters with default values if not provided.
 	excludeDirFilters := c.ExcludeDirFilters
@@ -111,6 +115,7 @@ func NewFileSystemIndexer(store store.Store, rootPath string, c config.IndexerCo
 		ExcludeFileFilters: excludeFileFilters,
 		Store:              store,
 		config:             c,
+		ctx:                ctx,
 	}
 
 	// Enable fsnotify watcher if Notify is true in the configuration.
@@ -155,49 +160,53 @@ func (idx *FileSystemIndexer) CleanIndex(prefix string) error {
 				continue
 			}
 		}
-		// Check if the file is a directory and the stored item type matches.
 
-		if fi.IsDir() && store.ItemType(item[1]) != DirItemType {
-			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+		switch store.ItemType(item[1]) {
+		case DirItemType:
+			if !fi.IsDir() {
+				slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
 
-			// Delete the key from the store if the types do not match.
-			if err = idx.Store.Delete(key); err != nil {
-				return err
+				// Delete the key from the store if the types do not match.
+				if err = idx.Store.Delete(key); err != nil {
+					return err
+				}
 			}
-		}
-		// Check if the file is not a directory and the stored item type matches.
-		if !fi.IsDir() && store.ItemType(item[1]) != FileItemType {
-			slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
+		case FileItemType:
+			if fi.IsDir() && store.ItemType(item[1]) != DirItemType {
+				slog.Debug("CleanIndex", "key", key, "path", path, "err", err)
 
-			// Delete the key from the store if the types do not match.
-			if err = idx.Store.Delete(key); err != nil {
-				return err
+				// Delete the key from the store if the types do not match.
+				if err = idx.Store.Delete(key); err != nil {
+					return err
+				}
 			}
 		}
 	}
+
+	// Perform maintenance operations on the store.
+	idx.Store.Maintenance()
+
 	// Return nil to indicate a successful cleaning operation.
 	return nil
 }
 
 // UpdateIndex updates the index by first cleaning it to remove stale entries
 // and then adding the paths starting from the root path.
-func (idx *FileSystemIndexer) UpdateIndex() error {
+func (idx *FileSystemIndexer) UpdateIndex() (time.Duration, error) {
 
+	startTime := time.Now()
 	// Clean the index to remove stale entries.
 	if err := idx.CleanIndex(""); err != nil {
-		return err
+		return 0, err
 	}
 
 	// Add the root path and its subdirectories to the index.
 	if err := idx.addPath(idx.RootPath); err != nil {
-		return err
+		return 0, err
 	}
 
-	// Perform maintenance operations on the store.
-	idx.Store.Maintenance()
-
 	// Return nil to indicate a successful update.
-	return nil
+	return time.Since(startTime), nil
 }
 
 // removePath removes entries from the index associated with the specified path.
@@ -319,9 +328,16 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 			// Clear the items list after successful batch insertion.
 			clear(itemList)
 		}
-		return err
+
+		// check for contex done channel for cancel.
+		select {
+		case <-idx.ctx.Done():
+			return idx.ctx.Err()
+		default:
+			return err
+		}
 	})
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		slog.Debug("After Walk", "err", err)
 		return
 	}
@@ -338,6 +354,6 @@ func (idx *FileSystemIndexer) addPath(newPath string) (err error) {
 	addInfo := fmt.Sprintf("All: %d, Files: %d, Dirs: %d, Failed: %d, rootPath: %s", idxSize, idxFileSize, idxDirSize, len(failedItems), idx.RootPath)
 	slog.Info(addInfo)
 
-	slog.Debug(idx.Store.Info())
+	// slog.Debug(idx.Store.Info())
 	return
 }

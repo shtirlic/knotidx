@@ -24,6 +24,9 @@ var (
 	programLevel         = new(slog.LevelVar) // Info by default
 	programProfiler bool = false
 
+	daemon *Daemon
+	client *Client
+
 	daemonCmd      = flag.Bool("daemon", false, "run knotidx daemon")
 	showConfigCmd  = flag.Bool("show-config", false, "show knotidx config")
 	checkConfigCmd = flag.Bool("check-config", false, "check knotidx config for errors")
@@ -63,6 +66,10 @@ func main() {
 	var conf config.Config
 	var s store.Store
 
+	// Load configs and open store
+	if conf, s, programErr = loadUp(); programErr != nil {
+		return
+	}
 	defer shutDown(s)
 
 	if *showConfigCmd {
@@ -73,36 +80,40 @@ func main() {
 		checkConfig()
 	}
 
-	// Load configs and open store
-	if conf, s, programErr = startUp(); programErr != nil {
-		return
-	}
 	if *daemonCmd {
-		programExitCode, programErr = daemonStart(conf, s)
+		daemon = NewDaemon(conf, s)
+		programExitCode, programErr = daemon.Start()
 	}
 
 	if *clientCmd {
-		programErr = idxClient(conf.GRPC)
+		client = NewClient(conf.GRPC)
+		programExitCode, programErr = client.Start()
 	}
 }
 
 // Do program shutdown
 func shutDown(s store.Store) {
-	slog.Info("Stoopping knotidx")
+	slog.Info("Stopping knotidx")
 
-	// If cmd was run in daemon mode
-	if *daemonCmd {
-		daemonShutDown()
+	// If was run in daemon mode
+	if daemon != nil {
+		daemon.ShutDown()
 	}
 
 	// Close the store
 	if s != nil {
 		// TODO: wrap err
-		s.Close()
+		err := s.Close()
+		if err != nil {
+			slog.Error("err", err)
+		}
 	}
 
 	if programErr != nil && programExitCode != 0 {
 		slog.Error("exit", "error", programErr)
+	}
+	if programErr == nil {
+		programExitCode = 0
 	}
 	memprofile()
 
@@ -115,7 +126,7 @@ func shutDown(s store.Store) {
 }
 
 // Startup seq reloading configs and create/open store
-func startUp() (c config.Config, s store.Store, err error) {
+func loadUp() (c config.Config, s store.Store, err error) {
 	// Load default config and file config
 	if c, err = reloadConfig(); err != nil {
 		return
@@ -134,7 +145,7 @@ func checkConfig() {
 		slog.Error("Config check error")
 		os.Exit(1)
 	} else {
-		slog.Info("Config check success")
+		slog.Info("Config check successful")
 		os.Exit(0)
 	}
 }
@@ -154,4 +165,16 @@ func reloadConfig() (config.Config, error) {
 		return config.Config{}, err
 	}
 	return c, nil
+}
+
+// newStore creates and opens a new store based on the provided configuration.
+// It returns the created store and any error encountered during creation or opening.
+func newStore(c config.StoreConfig) (store.Store, error) {
+	// Attempt to create/open the store
+	s, err := store.NewStore(c)
+	if err != nil {
+		slog.Error("Can't create/open the store", "store", s, "error", err)
+		return nil, err
+	}
+	return s, nil
 }

@@ -132,7 +132,7 @@ func (s *BadgerStore) Delete(key string) (err error) {
 }
 
 // Find retrieves information about an item from the Badger store based on the key.
-func (s *BadgerStore) Find(key string) (item *ItemInfo) {
+func (s *BadgerStore) Find(key string) (item ItemInfo) {
 	s.Open()
 	s.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
@@ -202,7 +202,7 @@ func (s *BadgerStore) Items() (items []*ItemInfo, err error) {
 		for it.Rewind(); it.Valid(); it.Next() {
 			i := it.Item()
 			storeItem := Item(i)
-			items = append(items, storeItem)
+			items = append(items, &storeItem)
 		}
 		return nil
 	})
@@ -213,14 +213,14 @@ func (s *BadgerStore) Items() (items []*ItemInfo, err error) {
 }
 
 // Item returns an ItemInfo from a Badger item.
-func Item(item *badger.Item) *ItemInfo {
+func Item(item *badger.Item) ItemInfo {
 	obj := &ItemInfo{}
 	err := item.Value(func(v []byte) error {
 		obj.Decode(v)
 		return nil
 	})
 	if err != nil {
-		return &ItemInfo{}
+		return ItemInfo{}
 	}
-	return obj
+	return *obj
 }

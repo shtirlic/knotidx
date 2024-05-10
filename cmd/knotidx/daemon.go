@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -23,48 +24,50 @@ const (
 	// triggerInterval = 10 * time.Second // Alternative shorter time interval for testing
 )
 
-// Variables used for background tasks
-var (
-	ticker *time.Ticker // Ticker for periodic actions
+type Daemon struct {
+	ticker          *time.Ticker // Ticker for periodic actions
+	cancelJobs      context.CancelFunc
+	cancelContext   context.Context
+	wg              sync.WaitGroup // WaitGroup for coordinating goroutines
+	lastTriggerTime time.Time      // Time of the last triggered action
+	config          config.Config
+	store           store.Store
+	grpcServer      *GRPServer
+}
 
-	wg sync.WaitGroup // WaitGroup for coordinating goroutines
-
-	quitCh   chan bool = make(chan bool) // Channel for quitting the main loop
-	quitWtCh chan bool = make(chan bool) // Channel for quitting the watcher goroutine
-
-	lastTriggerTime time.Time = time.UnixMicro(0) // Time of the last triggered action
-
-	daemonConf  config.Config
-	daemonStore store.Store
-)
+func NewDaemon(c config.Config, s store.Store) *Daemon {
+	return &Daemon{
+		config:          c,
+		store:           s,
+		lastTriggerTime: time.UnixMicro(0),
+		grpcServer:      NewGRPCServer(c, s),
+	}
+}
 
 // stopTicker stops the background ticker
-func stopTicker() {
-	if ticker != nil {
+func (d *Daemon) stopTicker() {
+	if d.ticker != nil {
 		slog.Debug("Stopping background ticker")
-		ticker.Stop()
+		d.ticker.Stop()
 	}
 }
 
 // waitJobs closes the watchers quit channel and waits for indexers jobs to finish.
-func waitJobs() {
-	slog.Debug("Closing the watchers quit channel")
-	close(quitWtCh) // Close the channel to signal watcher goroutines to quit
+func (d *Daemon) waitJobs() {
 	slog.Debug("Waiting for all indexers jobs to finish")
-	wg.Wait() // Wait for all indexer jobs to finish
+	d.wg.Wait() // Wait for all indexer jobs to finish
 }
 
 // daemonShutDown performs shutdown actions for the daemon.
-func daemonShutDown() {
-	stopTicker()     // Stop the background ticker
-	waitJobs()       // Wait for all indexers jobs to finish
-	stopGRPCServer() // Stop the gRPC server
+func (d *Daemon) ShutDown() {
+	d.stopTicker() // Stop the background ticker
+	d.cancelJobs()
+	d.waitJobs()        // Wait for all indexers jobs to finish
+	d.grpcServer.Stop() // Stop the gRPC server
 }
 
 // daemonStart initializes and starts the knotidx daemon.
-func daemonStart(c config.Config, s store.Store) (int, error) {
-	daemonConf = c
-	daemonStore = s
+func (d *Daemon) Start() (int, error) {
 
 	slog.Info("Starting knotidx daemon")
 
@@ -72,14 +75,16 @@ func daemonStart(c config.Config, s store.Store) (int, error) {
 	debug.SetMemoryLimit(384 << 20)
 	defer cpuprofile()()
 
+	d.cancelContext, d.cancelJobs = context.WithCancel(context.Background())
+
 	// Set up channel for signal notifications
-	sigCh := watchSignals()
+	sigCh := d.watchSignals()
 
 	// Start background ticker
-	ticker = newTicker(time.Duration(daemonConf.Interval))
+	d.ticker = d.newTicker(time.Duration(d.config.Interval))
 
 	// Start gRPC server in a goroutine
-	go startGRPCServer(daemonConf, daemonStore)
+	go d.grpcServer.Start()
 
 	var daemonErr error
 	var daemonExitCode int
@@ -87,18 +92,18 @@ func daemonStart(c config.Config, s store.Store) (int, error) {
 	// Main daemon loop
 	for {
 		select {
-		case <-ticker.C:
+		case <-d.ticker.C:
 			// Periodic work
-			tick()
+			d.tick()
 		case sig := <-sigCh:
 			// Handle received signals
-			_, exit, err := handleSginal(sig)
+			_, exit, err := d.handleSginal(sig)
 			if err != nil {
 				daemonExitCode = exit
 				daemonErr = err
-				close(quitCh)
+				d.cancelJobs()
 			}
-		case <-quitCh:
+		case <-d.cancelContext.Done():
 			// Quit the main loop
 			return daemonExitCode, daemonErr
 		}
@@ -106,108 +111,96 @@ func daemonStart(c config.Config, s store.Store) (int, error) {
 }
 
 // newTicker creates a new time.Ticker with the specified duration.
-func newTicker(t time.Duration) *time.Ticker {
+func (d *Daemon) newTicker(t time.Duration) *time.Ticker {
 	return time.NewTicker(time.Second * t)
 }
 
 // tick is a function called during each tick of the background ticker.
 // It logs information about the interval and triggers scheduled work.
-func tick() {
-	slog.Debug("Got work?", "interval", daemonConf.Interval)
-	scheduleWork()
+func (d *Daemon) tick() {
+	slog.Debug("Got work?", "interval", d.config.Interval)
+	d.scheduleWork()
 }
 
 // scheduleWork is responsible for scheduling and triggering background work based on specified conditions.
-func scheduleWork() {
+func (d *Daemon) scheduleWork() {
 	// Get the current system idle time
 	idleTime := idle.Idle()
 
 	slog.Debug("Load AVG", "load", idle.SysinfoAvg())
 	slog.Debug("Idle time", "idle", idleTime)
-	slog.Debug("Last work was at:", "date", lastTriggerTime)
+	slog.Debug("Last work was at:", "date", d.lastTriggerTime)
 
 	// Check if the conditions for triggering work are met
-	if (idleTime >= idleThreshold && time.Since(lastTriggerTime) >= triggerInterval) || time.UnixMicro(0) == lastTriggerTime {
+	if (idleTime >= idleThreshold && time.Since(d.lastTriggerTime) >= triggerInterval) || time.UnixMicro(0) == d.lastTriggerTime {
 
 		// Wait for any unfinished jobs before scheduling new ones
-		waitJobs()
+		d.waitJobs()
 		// Update the last trigger time to the current time
-		lastTriggerTime = time.Now()
-		slog.Info("Start addIndexers job", "time", lastTriggerTime, daemonStore)
-		// Create a new quit channel for indexers
-		quitWtCh = make(chan bool)
+		d.lastTriggerTime = time.Now()
+		slog.Info("Start addIndexers job", "time", d.lastTriggerTime, d.store)
 		// Start the addIndexers job
-		addIndexers(daemonConf.Indexer, daemonStore, quitWtCh)
+		d.addIndexers()
 	}
 }
 
 // addWatcher is responsible for adding a watcher to the specified indexer and managing its lifecycle.
-func addWatcher(idx indexer.Indexer, quitWtCh chan bool) {
-	defer wg.Done()
+func (d *Daemon) addWatcher(idx indexer.Indexer) {
+	defer d.wg.Done()
 
 	// Start the watcher for the indexer
-	idx.Watch(quitWtCh)
+	idx.Watch()
 }
 
 // addToIndex is responsible for adding items to the index using the specified indexer.
-func addToIndex(idx indexer.Indexer) {
-	defer wg.Done()
+func (d *Daemon) addToIndex(idx indexer.Indexer) {
+	defer d.wg.Done()
 
 	slog.Info("Starting updateIndex", "config", idx.Config())
 	// Attempt to update the index using the specified indexer
-	if err := idx.UpdateIndex(); err != nil {
+	td, err := idx.UpdateIndex()
+	if err != nil {
 		slog.Error("new index failed", "error", err, "indexer", idx)
 	}
+	slog.Info("Finished updateIndex", "duration", td, "config", idx.Config())
 }
 
 // addIndexers creates and starts indexers and watchers for each configuration in idxc.
 // It launches goroutines to update the index and watch for changes in the background.
-func addIndexers(idxc []config.IndexerConfig, s store.Store, qCh chan bool) {
+func (d *Daemon) addIndexers() {
 
-	slog.Debug("Indexers", "idx count", len(idxc))
+	slog.Debug("Indexers", "idx count", len(d.config.Indexer))
 
 	// Iterate over each indexer configuration
-	for _, idxConfig := range idxc {
+	for _, idxConfig := range d.config.Indexer {
 		// Create indexers based on the configuration
-		for _, idx := range indexer.NewIndexers(idxConfig, s) {
+		for _, idx := range indexer.NewIndexers(d.cancelContext, idxConfig, d.store) {
 
-			// Launch a goroutine to update the index
-			wg.Add(1)
-			go addToIndex(idx)
+			// Launch a goroutine to update the indexs
+			d.wg.Add(1)
+			go d.addToIndex(idx)
 
 			// Launch a goroutine to watch for changes
-			wg.Add(1)
-			go addWatcher(idx, qCh)
+			d.wg.Add(1)
+			go d.addWatcher(idx)
 		}
 	}
 }
 
-// newStore creates and opens a new store based on the provided configuration.
-// It returns the created store and any error encountered during creation or opening.
-func newStore(c config.StoreConfig) (store.Store, error) {
-	// Attempt to create/open the store
-	s, err := store.NewStore(c)
-	if err != nil {
-		slog.Error("Can't create/open the store", "store", s, "error", err)
-		return nil, err
-	}
-	return s, nil
-}
-
 // resetScheduler resets the scheduler by updating the ticker interval and resetting the lastTriggerTime.
 // It takes an integer parameter 'in' representing the new interval in seconds.
-func resetScheduler(in int) {
+func (d *Daemon) resetScheduler(in int) {
 	slog.Info("Scheduler reset", "interval", in)
 	// Reset the ticker to the new interval
-	ticker.Reset(time.Second * time.Duration(in))
+	d.ticker.Reset(time.Second * time.Duration(in))
 	// Reset the last background run time
-	lastTriggerTime = time.UnixMicro(0)
+	d.lastTriggerTime = time.UnixMicro(0)
 }
 
 // getExitCode calculates the exit code based on the received OS signal.
 // It adds 128 to the signal value to create a unique exit code for each signal.
 // The resulting exit code is suitable for conveying the reason for program termination.
-func getExitCode(sig os.Signal) int {
+func (d *Daemon) getExitCode(sig os.Signal) int {
 	return 128 + int(sig.(unix.Signal))
 }
 
@@ -215,16 +208,16 @@ func getExitCode(sig os.Signal) int {
 // It initiates a graceful shutdown of the daemon, closes the store, performs necessary cleanup,
 // and then restarts the daemon with the updated configuration.
 // If successful, it returns handled as true, exit as 0, and an error if any occurred.
-func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
+func (d *Daemon) handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	slog.Info("Reloading...")
 	handled = false
-	exit = getExitCode(sig)
+	exit = d.getExitCode(sig)
 
 	// Gracefully shut down the daemon
-	daemonShutDown()
+	d.ShutDown()
 
 	// Close the store
-	if err = daemonStore.Close(); err != nil {
+	if err = d.store.Close(); err != nil {
 		return
 	}
 
@@ -232,18 +225,17 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 	memprofile()
 
 	// Restart the daemon with the updated configuration
-	if daemonConf, daemonStore, err = startUp(); err != nil {
+	if d.config, d.store, err = loadUp(); err != nil {
 		return
 	}
 
-	// Create a new quitWtCh channel
-	quitWtCh = make(chan bool)
+	d.cancelContext, d.cancelJobs = context.WithCancel(context.Background())
 
 	// Reset the scheduler with the new interval
-	resetScheduler(daemonConf.Interval)
+	d.resetScheduler(d.config.Interval)
 
 	// Start the gRPC server in a new goroutine
-	go startGRPCServer(daemonConf, daemonStore)
+	go d.grpcServer.Start()
 
 	handled = true
 	exit = 0
@@ -252,7 +244,7 @@ func handleHUP(sig os.Signal) (handled bool, exit int, err error) {
 }
 
 // handleQuit handles termination signals (SIGINT, SIGTERM, SIGQUIT).
-func handleQuit(sig os.Signal) (bool, int, error) {
+func (d *Daemon) handleQuit(sig os.Signal) (bool, int, error) {
 	// exit := getExitCode(sig)
 	exit := 0
 	// Return a flag indicating the signal was handled, the exit code, and an error message
@@ -261,17 +253,17 @@ func handleQuit(sig os.Signal) (bool, int, error) {
 
 // handleSignal handles OS signals by determining the appropriate action,
 // and returning a flag indicating if the signal was handled, the exit code, and an error message if any.
-func handleSginal(sig os.Signal) (bool, int, error) {
+func (d *Daemon) handleSginal(sig os.Signal) (bool, int, error) {
 	slog.Info("Got signal", "signal", sig)
 	// Get the exit code associated with the signal
-	exit := getExitCode(sig)
+	exit := d.getExitCode(sig)
 
 	// Handle different signals
 	switch sig {
 	case unix.SIGINT, unix.SIGTERM, unix.SIGQUIT:
-		return handleQuit(sig)
+		return d.handleQuit(sig)
 	case unix.SIGHUP:
-		return handleHUP(sig)
+		return d.handleHUP(sig)
 	default:
 		return false, exit, fmt.Errorf("signal %v not handled", sig)
 	}
@@ -280,7 +272,7 @@ func handleSginal(sig os.Signal) (bool, int, error) {
 // watchSignals sets up a channel for notifying the program of OS signals.
 // It creates a buffered channel, registers it to receive specified signals (SIGINT, SIGTERM, SIGQUIT, SIGHUP),
 // and returns the channel for signal notifications.
-func watchSignals() chan os.Signal {
+func (d *Daemon) watchSignals() chan os.Signal {
 	// Create a buffered channel for signal notifications
 	sgsCh := make(chan os.Signal, 1)
 
