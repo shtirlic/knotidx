@@ -45,7 +45,7 @@ func (o *ItemInfo) String() string {
 		o.MimeType,
 		o.ModTime.String(),
 		strconv.FormatInt(o.Size, 10),
-	}, "")
+	}, ":")
 }
 
 // KeyName generates a key name for the item.
