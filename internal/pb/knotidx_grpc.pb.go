@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.3.0
 // - protoc             v4.25.3
-// source: proto/knotidx.proto
+// source: knotidx.proto
 
 package pb
 
@@ -216,5 +216,5 @@ var Knotidx_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "proto/knotidx.proto",
+	Metadata: "knotidx.proto",
 }
