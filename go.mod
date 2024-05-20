@@ -29,5 +29,5 @@ require (
 	github.com/pkg/errors v0.9.1 // indirect
 	go.opencensus.io v0.24.0 // indirect
 	golang.org/x/net v0.24.0 // indirect
-	google.golang.org/grpc v1.63.2
+	google.golang.org/grpc v1.64.0
 )
