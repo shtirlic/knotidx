@@ -16,7 +16,7 @@ knotidx requires [Go](https://go.dev/) version [1.22](https://go.dev/doc/devel/r
 Use `go install`:
 
 ```sh
-go install github.com/shtirlic/knotidx@latest
+go install github.com/shtirlic/knotidx/cmd/knotidx@latest
 ```
 
 Arch AUR package and homebrew coming soon.
