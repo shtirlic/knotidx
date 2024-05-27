@@ -19,7 +19,12 @@ Use `go install`:
 go install github.com/shtirlic/knotidx/cmd/knotidx@latest
 ```
 
-Arch AUR package and homebrew coming soon.
+Use `yay` for Arch AUR package:
+
+```sh
+yay knotidx
+
+```
 
 ### Building
 
