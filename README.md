@@ -97,7 +97,8 @@ paths = ["/tmp"]
 - [ ] D-BUS interface
 - [ ] KDE Baloo drop-in replacement
 - [ ] Events and callbacks
-- [ ] Testing
+- [ ] Full featured interactive TUI [#6](https://github.com/shtirlic/knotidx/issues/6)
+- [ ] Testing [#5](https://github.com/shtirlic/knotidx/issues/5)
 
 ## Supported Stores and Indexers
 
