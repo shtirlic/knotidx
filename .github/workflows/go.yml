@@ -16,26 +16,26 @@ jobs:
     name: Run govulncheck
     steps:
       - id: govulncheck
-        uses: golang/govulncheck-action@v1
+        uses: golang/govulncheck-action@v1.0.4
         with:
-          go-version-input: 1.22
+          go-version-input: 1.24
           go-package: ./...
   build:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v4.2.2
     - name: Get current date
       id: date
       run: |
         echo "DATE=$(date +'%y%m')" >> $GITHUB_ENV
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v5.3.0
       with:
         go-version: '1.22'
     - name: Build knotidx
       run: go build -v ./cmd/knotidx
     - name: Archive production artifacts
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v4.6.1
       with:
         name: knotidx-release-${{ env.DATE }}-${{ github.ref_name }}-${{ github.sha }}
         path: |
