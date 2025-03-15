@@ -9,7 +9,7 @@ __knotidx__ is a fast object indexer daemon with GRPC backend and cli client.
 
 ### Prerequisites
 
-knotidx requires [Go](https://go.dev/) version [1.22](https://go.dev/doc/devel/release#go1.22.0) or above.
+knotidx requires [Go](https://go.dev/) version [1.24](https://go.dev/doc/devel/release#go1.24.1) or above.
 
 ### Installing
 
@@ -121,4 +121,4 @@ paths = ["/tmp"]
 
 MIT License
 
-Copyright (c) 2024 Serg Podtynnyi
+Copyright (c) 2024-2025 Serg Podtynnyi
