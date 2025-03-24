@@ -3,7 +3,7 @@ module github.com/shtirlic/knotidx
 go 1.24.1
 
 require (
-	github.com/BurntSushi/toml v1.4.0
+	github.com/BurntSushi/toml v1.5.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgraph-io/badger/v4 v4.6.0
 	github.com/fsnotify/fsnotify v1.8.0
