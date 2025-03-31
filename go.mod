@@ -1,14 +1,13 @@
 module github.com/shtirlic/knotidx
 
 go 1.24.1
-
 require (
 	github.com/BurntSushi/toml v1.4.0
 	github.com/cespare/xxhash/v2 v2.3.0
 	github.com/dgraph-io/badger/v4 v4.6.0
 	github.com/fsnotify/fsnotify v1.8.0
 	golang.org/x/sys v0.31.0
-	google.golang.org/protobuf v1.36.5
+	google.golang.org/protobuf v1.36.6
 )
 
 require (
