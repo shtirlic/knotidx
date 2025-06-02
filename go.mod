@@ -29,5 +29,5 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	golang.org/x/net v0.37.0 // indirect
-	google.golang.org/grpc v1.71.0
+	google.golang.org/grpc v1.72.2
 )
